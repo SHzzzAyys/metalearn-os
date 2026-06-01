@@ -15,7 +15,7 @@ Most study tools optimize for storing notes, generating summaries, or scheduling
 - Real learning evidence comes from what the learner can retrieve, explain, and correct.
 - Confidence should be predicted before feedback, otherwise calibration cannot be measured.
 - AI should not quietly replace thinking. It can propose cards, ask questions, or draft reports, but the learner must review, reject, revise, and connect the evidence.
-- Privacy matters because learning materials, errors, and self-assessments are sensitive. The MVP is local-first and exportable.
+- Privacy matters because learning materials, errors, and self-assessments are sensitive. The MVP is local-first, exportable, and restorable from local JSON packages.
 - Metacognition can become overhead. Planning, check-ins, and reflection must stay lightweight.
 
 ## Product Surface
@@ -28,7 +28,7 @@ The active app is `apps/metalearn-os`, a unified product with six workspaces:
 - `费曼解释`: explanation attempts, three Socratic questions, rubric scores, version history, gap tags, concept nodes, and card handoff.
 - `学习罗盘`: 60-second plan, low-frequency check-ins, 2-minute reflection, prediction-vs-actual tracking, and deterministic daily advice.
 - `洞察报告`: Brier score, overconfidence, high-confidence error rate, passive-learning risk, weak tags, tag-level overconfidence, and explanation gap types.
-- `设置与隐私`: local AI mode, export, CSV/Anki download, privacy contract, and local data deletion.
+- `设置与隐私`: local AI mode, export/restore boundaries, CSV/Anki download, privacy contract, and local data deletion.
 
 The older three apps are retained as legacy module references:
 
@@ -57,7 +57,7 @@ Implemented:
 - explanation-to-card handoff;
 - lightweight learning sessions, check-ins, reflections, and prediction bias;
 - insight snapshots and deterministic recommendations;
-- JSON export package with manifest;
+- JSON export and restore package with manifest, local preflight validation, and conflict handling;
 - CSV and Anki TSV export;
 - one-step data export and two-step local deletion;
 - desktop and mobile E2E coverage.
@@ -244,6 +244,13 @@ import material -> AI preview -> generate candidates -> approve card
 -> Feynman questions -> explanation version -> insight/privacy checks
 ```
 
+It also covers the local restore loop:
+
+```text
+import material -> manual source-grounded card -> export JSON
+-> clear local data -> import JSON with preview -> review restored card
+```
+
 ## CI
 
 GitHub Actions runs:
@@ -264,10 +271,10 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for the current beta roadmap.
 
 Near-term milestones:
 
-- `v0.2.0`: material detail pages and manual card creation;
+- `v0.2.0`: material detail pages, manual card creation, and JSON import/restore;
 - `v0.3.0`: strict review state machine and high-confidence error workspace;
 - `v0.4.0`: explanation version diffs and stronger insights;
-- `v0.5.0`: JSON import/restore and safe provider proxy boundary.
+- `v0.5.0`: safe provider proxy boundary and stronger restore compatibility.
 
 ## Development Principles
 
@@ -276,7 +283,7 @@ Near-term milestones:
 - Prefer confidence prediction before answer feedback.
 - Prefer source evidence over AI authority.
 - Prefer reviewable candidates over automatic generation.
-- Prefer local storage and explicit export over hidden cloud state.
+- Prefer local storage and explicit export/restore over hidden cloud state.
 - Prefer low metacognitive overhead over dashboards that consume learning time.
 
 ## Contributing

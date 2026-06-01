@@ -12,6 +12,10 @@ import type {
   CheckInFocusState,
   ConceptRelationType,
   ExplanationAttempt,
+  ImportConflictStrategy,
+  ImportPackagePayload,
+  ImportPlan,
+  ImportPreview,
   LearningSession,
   LearningTemplateId,
   MistakeReason,
@@ -34,10 +38,15 @@ import {
   candidatesToAnkiTsv,
   chunkText,
   clearAllLocalData,
+  applyImportPlan,
   createExportManifest,
   createId,
   downloadTextFile,
+  emptyImportPayload,
   getMetaLearnDb,
+  parseImportPackage,
+  planImport,
+  type ParsedImportPackage,
   saveLearningEvent,
   serializeExportPackage,
   validateCardCandidateEvidence
@@ -62,6 +71,17 @@ interface ManualCardForm {
   cardType: CardType;
   difficulty: 1 | 2 | 3 | 4 | 5;
   tagsText: string;
+}
+
+interface ImportReport {
+  materialCount: number;
+  chunkCount: number;
+  candidateCount: number;
+  cardCount: number;
+  reviewCount: number;
+  skippedCount: number;
+  repairedCount: number;
+  firstMaterialId?: string;
 }
 
 const emptyManualCardForm: ManualCardForm = {
@@ -119,6 +139,13 @@ export function useMetaLearnWorkspace() {
   const [aiPreview, setAiPreview] = useState<AIRequestPreview | null>(null);
   const [pendingCardRequest, setPendingCardRequest] = useState<PendingCardRequest | null>(null);
   const [manualCardForm, setManualCardForm] = useState<ManualCardForm>(emptyManualCardForm);
+  const [importText, setImportText] = useState("");
+  const [importPackage, setImportPackage] = useState<ParsedImportPackage | null>(null);
+  const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
+  const [importPlan, setImportPlan] = useState<ImportPlan | null>(null);
+  const [importStrategy, setImportStrategyState] = useState<ImportConflictStrategy>("keep_both");
+  const [importReport, setImportReport] = useState<ImportReport | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -645,6 +672,78 @@ export function useMetaLearnWorkspace() {
     return setAction(result(true, "本地数据已清空。"));
   }
 
+  async function prepareJsonImport(fileText: string): Promise<ActionResult> {
+    setImportText(fileText);
+    setImportReport(null);
+    const parsed = parseImportPackage(fileText);
+    if (!parsed.ok) {
+      setImportPackage(null);
+      setImportPreview(parsed.preview);
+      setImportPlan(null);
+      await saveLearningEvent({ id: createId("event"), appId: "metalearn-os", actionType: "data_import_failed", outcome: "saved", createdAt: new Date().toISOString() });
+      return setAction(result(false, parsed.error));
+    }
+    const current = buildCurrentImportPayload(state);
+    const nextPlan = planImport(parsed.package, current, importStrategy);
+    setImportPackage(parsed.package);
+    setImportPreview(nextPlan.preview);
+    setImportPlan(nextPlan);
+    await saveLearningEvent({ id: createId("event"), appId: "metalearn-os", actionType: "import_preview_created", outcome: "saved", createdAt: new Date().toISOString() });
+    if (!nextPlan.preview.canImport) return setAction(result(false, "导入预检未通过，请先查看 fatal 问题。"));
+    return setAction(result(true, "导入预览已生成。确认后才会写入本地数据。", { requiresConfirmation: true }));
+  }
+
+  function setImportStrategy(strategy: ImportConflictStrategy) {
+    setImportStrategyState(strategy);
+    if (!importPackage) return;
+    const nextPlan = planImport(importPackage, buildCurrentImportPayload(state), strategy);
+    setImportPreview(nextPlan.preview);
+    setImportPlan(nextPlan);
+  }
+
+  function cancelJsonImport(): ActionResult {
+    setImportText("");
+    setImportPackage(null);
+    setImportPreview(null);
+    setImportPlan(null);
+    setImportReport(null);
+    return setAction(result(true, "已取消本次导入。"));
+  }
+
+  async function confirmJsonImport(): Promise<ActionResult> {
+    if (!importPlan) return setAction(result(false, "没有可确认的导入计划。"));
+    if (!importPlan.preview.canImport) return setAction(result(false, "导入预检未通过，不能写入本地数据。"));
+    setIsImporting(true);
+    try {
+      await applyImportPlan(getMetaLearnDb(), importPlan);
+      const timestamp = new Date().toISOString();
+      const firstMaterialId = importPlan.inserts.materials[0]?.id;
+      const eventId = createId("event");
+      await saveLearningEvent({ id: eventId, sourceId: firstMaterialId, appId: "metalearn-os", actionType: "data_imported", outcome: "saved", createdAt: timestamp });
+      setImportReport({
+        materialCount: importPlan.inserts.materials.length,
+        chunkCount: importPlan.inserts.chunks.length,
+        candidateCount: importPlan.inserts.candidates.length,
+        cardCount: importPlan.inserts.cards.length,
+        reviewCount: importPlan.inserts.reviews.length,
+        skippedCount: importPlan.skipped.length,
+        repairedCount: importPlan.repaired.length,
+        firstMaterialId
+      });
+      setImportText("");
+      setImportPackage(null);
+      setImportPreview(null);
+      setImportPlan(null);
+      await loadData();
+      return setAction(result(true, "导入完成，数据已写入本地 IndexedDB。", { eventId }));
+    } catch (caught) {
+      await saveLearningEvent({ id: createId("event"), appId: "metalearn-os", actionType: "data_import_failed", outcome: "saved", createdAt: new Date().toISOString() });
+      return setAction(result(false, caught instanceof Error ? caught.message : "导入失败，现有数据未被修改。"));
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
   function exportJson() {
     const payload = {
       materials: state.sources,
@@ -786,6 +885,12 @@ export function useMetaLearnWorkspace() {
     setModelName,
     aiPreview,
     manualCardForm,
+    importText,
+    importPreview,
+    importPlan,
+    importStrategy,
+    importReport,
+    isImporting,
     importSource,
     prepareCandidateGeneration,
     confirmCandidateGeneration,
@@ -809,6 +914,10 @@ export function useMetaLearnWorkspace() {
     saveInsight,
     saveAIConfig,
     resetLocalData,
+    prepareJsonImport,
+    setImportStrategy,
+    cancelJsonImport,
+    confirmJsonImport,
     exportJson,
     exportMaterial,
     archiveSource,
@@ -832,4 +941,25 @@ function scoreAverage(scores: ExplanationAttempt["rubricScores"]): number {
 
 function buildManualSourceQuote(chunk: SourceChunk): string {
   return chunk.text.replace(/\s+/g, " ").trim().slice(0, 260);
+}
+
+function buildCurrentImportPayload(state: WorkspaceState): ImportPackagePayload {
+  return {
+    ...emptyImportPayload(),
+    materials: state.sources,
+    chunks: state.chunks,
+    importJobs: state.importJobs,
+    candidates: state.candidates,
+    cards: state.cards,
+    reviews: state.logs,
+    explanations: state.explanations,
+    conceptNodes: state.conceptNodes,
+    conceptEdges: state.conceptEdges,
+    sessions: state.sessions,
+    checkIns: state.checkIns,
+    reflections: state.reflections,
+    insights: state.insights,
+    aiProviderConfigs: state.aiConfigs,
+    aiRequestPreviews: state.aiRequestPreviews
+  };
 }

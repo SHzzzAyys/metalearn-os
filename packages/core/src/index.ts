@@ -270,6 +270,56 @@ export interface ExportManifest {
   includesAIRequestRecords: boolean;
 }
 
+export type ImportPackageKind = "full_backup" | "material_package" | "unknown";
+export type ImportConflictStrategy = "keep_both" | "skip_duplicates";
+
+export interface ImportProblem {
+  code: string;
+  severity: "warning" | "repairable" | "fatal";
+  table: string;
+  id?: string;
+  message: string;
+}
+
+export interface ImportPreview {
+  kind: ImportPackageKind;
+  schemaVersion?: number;
+  exportedAt?: string;
+  counts: ExportManifest["counts"];
+  canImport: boolean;
+  conflicts: ImportProblem[];
+  repaired: ImportProblem[];
+  warnings: ImportProblem[];
+  fatalProblems: ImportProblem[];
+}
+
+export interface ImportPackagePayload {
+  materials: SourceDocument[];
+  chunks: SourceChunk[];
+  importJobs: ImportJob[];
+  candidates: CardCandidate[];
+  cards: Card[];
+  reviews: ReviewLog[];
+  explanations: ExplanationAttempt[];
+  conceptNodes: ConceptNode[];
+  conceptEdges: ConceptEdge[];
+  sessions: LearningSession[];
+  checkIns: CheckIn[];
+  reflections: Reflection[];
+  insights: InsightSnapshot[];
+  aiProviderConfigs: AIProviderConfig[];
+  aiRequestPreviews: AIRequestPreview[];
+}
+
+export interface ImportPlan {
+  strategy: ImportConflictStrategy;
+  preview: ImportPreview;
+  idMap: Record<string, string>;
+  inserts: ImportPackagePayload;
+  skipped: ImportProblem[];
+  repaired: ImportProblem[];
+}
+
 export interface ReviewQueueItem {
   card: Card;
   source?: SourceDocument;
@@ -347,8 +397,11 @@ export interface LearningEvent {
     | "explanation_attempted"
     | "handoff_exported"
     | "ai_preview_created"
+    | "import_preview_created"
     | "concept_edge_added"
     | "data_exported"
+    | "data_imported"
+    | "data_import_failed"
     | "data_deleted";
   confidence?: 1 | 2 | 3 | 4 | 5;
   outcome?: ReviewOutcome | "completed" | "saved" | "exported";

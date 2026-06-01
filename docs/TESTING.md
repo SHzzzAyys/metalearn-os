@@ -45,6 +45,9 @@ High-value unit tests should cover:
 - prediction bias;
 - explanation gap summaries;
 - export manifest shape;
+- import package parse and schema rejection;
+- import preview warnings, repairable issues, and fatal problems;
+- import conflict planning for `keep_both` and `skip_duplicates`;
 - AI output schemas.
 
 ## Integration Test Priorities
@@ -56,7 +59,8 @@ Important integration paths:
 - high-confidence error -> mistake reason -> explanation repair;
 - explanation version -> gap tags -> candidate handoff;
 - session -> check-in -> reflection -> daily plan;
-- export -> clear -> import restore when import is implemented.
+- export -> clear -> import restore -> review restored card;
+- failed import -> no IndexedDB mutation.
 
 ## E2E Priorities
 
@@ -69,6 +73,8 @@ Desktop and mobile should cover:
 - high-confidence error visibility;
 - Feynman questions and explanation save;
 - insight and privacy copy;
+- JSON restore preview and import report;
+- invalid JSON and fatal import problems;
 - no unsupported learning claims.
 
 ## Visual and Accessibility Checks
@@ -81,6 +87,7 @@ Recommended visual targets:
 - explain desktop;
 - insights desktop;
 - settings mobile.
+- library import preview, success report, and failure state.
 
 Recommended accessibility checks:
 

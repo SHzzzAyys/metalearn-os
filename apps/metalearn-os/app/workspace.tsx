@@ -1,5 +1,6 @@
 "use client";
 
+import type { ChangeEvent } from "react";
 import { useEffect, useState } from "react";
 import {
   Archive,
@@ -28,6 +29,9 @@ import type {
   CheckInFocusState,
   ConceptRelationType,
   ExplanationAttempt,
+  ImportConflictStrategy,
+  ImportPreview,
+  ImportProblem,
   LearningTemplateId,
   MistakeReason,
   ProductArea,
@@ -252,6 +256,7 @@ function LibraryView({ workspace }: { workspace: Workspace }) {
         <MaterialStatusFlow sources={state.sources} />
         {workspace.manualCardForm.isOpen ? <ManualCardPanel workspace={workspace} /> : null}
       </Panel>
+      <ImportRestorePanel workspace={workspace} />
       <Panel>
         <h3 className="text-2xl font-semibold tracking-[-0.02em]">资产搜索</h3>
         <div className="mt-4">
@@ -287,6 +292,125 @@ function LibraryView({ workspace }: { workspace: Workspace }) {
         </div>
       </Panel>
     </section>
+  );
+}
+
+function ImportRestorePanel({ workspace }: { workspace: Workspace }) {
+  async function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    if (!file) return;
+    await workspace.prepareJsonImport(await file.text());
+    event.currentTarget.value = "";
+  }
+
+  return (
+    <Panel>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h3 className="text-2xl font-semibold tracking-[-0.02em]">导入与恢复</h3>
+          <p className="mt-1 text-sm leading-6 text-zinc-600">导入 MetaLearn OS JSON 包。文件只在本地浏览器解析，预检通过并确认后才写入 IndexedDB。</p>
+        </div>
+        <Badge>本地解析</Badge>
+      </div>
+      <div className="mt-5 grid gap-4">
+        <Field label="选择 JSON 导出包" hint="支持全量备份包和单材料包。不支持无来源 flashcard 导入。">
+          <input
+            className="block w-full rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 text-sm text-zinc-950 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-950 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            type="file"
+            accept="application/json,.json"
+            onChange={(event) => void handleImportFile(event)}
+          />
+        </Field>
+        {workspace.importPreview ? <ImportPreviewBlock workspace={workspace} preview={workspace.importPreview} /> : null}
+        {workspace.importReport ? (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-950">
+            <p className="font-semibold">导入完成</p>
+            <p className="mt-1">
+              新增 {workspace.importReport.materialCount} 份材料、{workspace.importReport.cardCount} 张卡片、{workspace.importReport.reviewCount} 条复习记录。
+              修复 {workspace.importReport.repairedCount} 项，跳过 {workspace.importReport.skippedCount} 项。
+            </p>
+            {workspace.importReport.firstMaterialId ? <TextLink href={`/library/${workspace.importReport.firstMaterialId}`}>查看导入材料</TextLink> : null}
+          </div>
+        ) : null}
+      </div>
+    </Panel>
+  );
+}
+
+function ImportPreviewBlock({ workspace, preview }: { workspace: Workspace; preview: ImportPreview }) {
+  return (
+    <div className="rounded-[1.25rem] border border-zinc-200 bg-white/76 p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge>{importKindLabel(preview.kind)}</Badge>
+        <Badge>schema {preview.schemaVersion ?? "unknown"}</Badge>
+        <Badge>{preview.canImport ? "可导入" : "不可导入"}</Badge>
+      </div>
+      <p className="mt-3 text-sm leading-6 text-zinc-600">导出时间：{preview.exportedAt ? new Date(preview.exportedAt).toLocaleString("zh-CN") : "未提供"}</p>
+      <div className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+        <ImportCount label="材料" value={preview.counts.materials} />
+        <ImportCount label="片段" value={preview.counts.chunks} />
+        <ImportCount label="候选" value={preview.counts.candidates} />
+        <ImportCount label="卡片" value={preview.counts.cards} />
+        <ImportCount label="复习" value={preview.counts.reviews} />
+        <ImportCount label="解释" value={preview.counts.explanations} />
+        <ImportCount label="会话" value={preview.counts.sessions} />
+        <ImportCount label="洞察" value={preview.counts.insights} />
+        <ImportCount label="AI 记录" value={preview.counts.aiRequestPreviews} />
+      </div>
+      <div className="mt-4 grid gap-3">
+        <Field label="冲突策略">
+          <ImportStrategySelect value={workspace.importStrategy} onChange={workspace.setImportStrategy} />
+        </Field>
+        <div className="grid gap-2 text-sm">
+          {preview.conflicts.length > 0 ? <ImportProblemList title="冲突" problems={preview.conflicts} /> : null}
+          {preview.repaired.length > 0 ? <ImportProblemList title="可修复" problems={preview.repaired} /> : null}
+          {preview.warnings.length > 0 ? <ImportProblemList title="警告" problems={preview.warnings} /> : null}
+          {preview.fatalProblems.length > 0 ? <ImportProblemList title="阻断问题" problems={preview.fatalProblems} danger /> : null}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button disabled={!preview.canImport || workspace.isImporting} onClick={() => void workspace.confirmJsonImport()}>
+            <Upload size={16} /> {workspace.isImporting ? "导入中" : "确认导入"}
+          </Button>
+          <SecondaryButton onClick={workspace.cancelJsonImport}>
+            <X size={16} /> 取消
+          </SecondaryButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ImportStrategySelect({ value, onChange }: { value: ImportConflictStrategy; onChange: (value: ImportConflictStrategy) => void }) {
+  return (
+    <select className="min-h-11 rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 text-sm outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100" value={value} onChange={(event) => onChange(event.target.value as ImportConflictStrategy)}>
+      <option value="keep_both">保留两份，冲突时重命名</option>
+      <option value="skip_duplicates">跳过重复项</option>
+    </select>
+  );
+}
+
+function ImportCount({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-xl bg-zinc-50 p-3">
+      <p className="text-xs font-semibold text-zinc-500">{label}</p>
+      <p className="mt-1 font-mono text-lg font-semibold tabular-nums text-zinc-950">{value}</p>
+    </div>
+  );
+}
+
+function ImportProblemList({ title, problems, danger = false }: { title: string; problems: ImportProblem[]; danger?: boolean }) {
+  return (
+    <div className={danger ? "rounded-2xl border border-rose-200 bg-rose-50 p-3 text-rose-950" : "rounded-2xl bg-zinc-50 p-3 text-zinc-700"}>
+      <p className="font-semibold">{title} · {problems.length}</p>
+      <ul className="mt-2 grid gap-1">
+        {problems.slice(0, 4).map((item) => (
+          <li key={`${item.code}-${item.table}-${item.id ?? item.message}`} className="break-words text-xs leading-5">
+            {item.table}{item.id ? ` / ${item.id}` : ""}: {item.message}
+          </li>
+        ))}
+      </ul>
+      {problems.length > 4 ? <p className="mt-2 text-xs">另有 {problems.length - 4} 项未展开。</p> : null}
+    </div>
   );
 }
 
@@ -1062,6 +1186,12 @@ function formatDate(value?: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "暂无";
   return date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+}
+
+function importKindLabel(kind: ImportPreview["kind"]): string {
+  if (kind === "full_backup") return "全量备份";
+  if (kind === "material_package") return "单材料包";
+  return "无法识别";
 }
 
 function syncTagsText(current: string, cardType: CardType): string {

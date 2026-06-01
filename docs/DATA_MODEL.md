@@ -99,7 +99,48 @@ Export packages should include:
 - insights;
 - AI request previews.
 
-Future import/restore must validate package shape before mutating local data.
+## Import and Restore
+
+The current restore format is the same schema `v3` JSON package produced by the app. The importer recognizes:
+
+- `full_backup`: a full local workspace export;
+- `material_package`: one material plus its related chunks, candidates, cards, reviews, explanations, sessions, insights, and audit records;
+- `unknown`: a malformed or unsupported package shape.
+
+Import is intentionally staged:
+
+1. Parse JSON text.
+2. Validate schema and payload shape.
+3. Create a preview with counts, conflicts, warnings, repairable issues, and fatal problems.
+4. Ask the user to confirm a conflict strategy.
+5. Write all inserts in one IndexedDB transaction.
+
+The importer must not mutate IndexedDB during parse, validation, or preview. A failed transaction must not leave partial imported data.
+
+## Import Integrity Rules
+
+Import validation checks:
+
+- `schemaVersion` must equal `3`;
+- manifest counts should match payload counts, otherwise a warning is shown;
+- `SourceChunk.sourceId` must resolve to a material;
+- `CardCandidate.sourceChunkId` must resolve to a chunk;
+- `Card.sourceChunkId` must resolve to a chunk;
+- `ReviewLog.cardId` must resolve to a card;
+- `ReviewLog.sourceId` must resolve to a material, or be repairable through `cardId -> card.sourceChunkId -> chunk.sourceId`;
+- candidate and card `sourceQuote` must be present and match the referenced chunk text;
+- source-grounded cards without valid evidence are rejected.
+
+Fatal problems disable import confirmation. Repairable problems are shown in the preview and fixed in the import plan before write.
+
+## Import Conflict Strategies
+
+Two conflict strategies are supported:
+
+- `keep_both`: default. Existing local data is preserved. Conflicting imported ids are remapped, references are rewritten, and imported material titles are marked as imported copies.
+- `skip_duplicates`: conflicting objects and their dependent objects are skipped. This is useful when importing the same package repeatedly.
+
+The importer does not support overwrite. This is deliberate: local learning records are user-owned evidence, so restoring a backup must not silently replace current work.
 
 ## Migration Rules
 
