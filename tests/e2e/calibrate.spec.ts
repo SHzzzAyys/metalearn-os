@@ -1,0 +1,45 @@
+import { expect, test } from "@playwright/test";
+
+test("MetaLearn OS completes the unified learning loop", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "今天该做什么" })).toBeVisible();
+  await expect(page.getByText("北极星指标")).toBeVisible();
+
+  await page.goto("/library");
+  await expect(page.getByRole("heading", { name: "资料库" })).toBeVisible();
+  await page.getByRole("button", { name: /保存到资料库/ }).click();
+  await expect(page.getByRole("link", { name: "我的学习材料" })).toBeVisible();
+  await page.getByRole("button", { name: /生成候选题/ }).click();
+  await expect(page.getByText("将发送哪些内容")).toBeVisible();
+  await expect(page.getByText("本地 mock")).toBeVisible();
+  await page.getByRole("button", { name: /确认发送并生成候选题/ }).click();
+  await expect(page.getByRole("button", { name: /批准进入复习/ }).first()).toBeVisible();
+  await page.getByRole("button", { name: /批准进入复习/ }).first().click();
+
+  await page.goto("/review");
+  await expect(page.getByRole("heading", { name: "校准记忆" })).toBeVisible();
+  await expect(page.getByText("来源已隐藏。先主动提取，再在自评后查看证据。")).toBeVisible();
+  await page.locator("button").filter({ hasText: /^5$/ }).first().click();
+  await page.getByPlaceholder("先回想，再看来源。不要直接复制。").fill("我把熟悉感当成了掌握，但没能说清机制。");
+  await page.getByRole("button", { name: "错 A", exact: true }).click();
+  await expect(page.getByText(/校准差距/)).toBeVisible();
+  await expect(page.getByText(/信心 5，结果 again/)).toBeVisible();
+
+  await page.goto("/explain");
+  await expect(page.getByRole("heading", { name: "费曼解释" })).toBeVisible();
+  await page.getByLabel("你的解释").fill("间隔效应的机制是多次隔开的主动提取让记忆在不同时间点重新被检索。比如今天学完先自测，明天再自测，三天后再自测；如果每次只是重读材料，熟悉感会变强，但不一定能独立回答。它的边界是任务太简单或没有反馈时，间隔本身不能修正错误。");
+  await page.getByRole("button", { name: /生成 3 个追问/ }).click();
+  await expect(page.getByText("Q1")).toBeVisible();
+  await page.getByRole("button", { name: /保存解释版本/ }).click();
+  await expect(page.getByText(/间隔效应 · v1/)).toBeVisible();
+  await page.getByRole("button", { name: /从漏洞生成卡片/ }).click();
+
+  await page.goto("/insights");
+  await expect(page.getByRole("heading", { name: "洞察报告" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "校准报告" })).toBeVisible();
+
+  await page.goto("/settings");
+  await expect(page.getByText("未点击 AI 操作前不上传材料。")).toBeVisible();
+  await expect(page.locator("body")).not.toContainText("保证变聪明");
+});

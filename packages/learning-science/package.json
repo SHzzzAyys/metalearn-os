@@ -1,0 +1,17 @@
+{
+  "name": "@metalearn/learning-science",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@metalearn/core": "0.1.0"
+  }
+}
+

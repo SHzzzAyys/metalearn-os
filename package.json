@@ -1,0 +1,62 @@
+{
+  "name": "metalearn-suite",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SHzzzAyys/metalearn-os.git"
+  },
+  "bugs": {
+    "url": "https://github.com/SHzzzAyys/metalearn-os/issues"
+  },
+  "homepage": "https://github.com/SHzzzAyys/metalearn-os#readme",
+  "overrides": {
+    "postcss": "8.5.15"
+  },
+  "workspaces": [
+    "packages/core",
+    "packages/learning-science",
+    "packages/ai",
+    "packages/storage",
+    "packages/ui",
+    "apps/metalearn-os",
+    "apps/calibrate-memory",
+    "apps/learning-compass",
+    "apps/feynman-workshop"
+  ],
+  "scripts": {
+    "dev:os": "npm run dev -w @metalearn/metalearn-os",
+    "dev:calibrate": "npm run dev -w @metalearn/calibrate-memory",
+    "dev:compass": "npm run dev -w @metalearn/learning-compass",
+    "dev:feynman": "npm run dev -w @metalearn/feynman-workshop",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "eslint .",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "verify": "npm run typecheck && npm run test && npm run lint && npm run build"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "dexie": "^4.4.3",
+    "lucide-react": "^0.468.0",
+    "next": "16.2.6",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
+    "@playwright/test": "^1.60.0",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.6",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
+  }
+}

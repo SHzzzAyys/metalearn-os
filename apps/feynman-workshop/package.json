@@ -1,0 +1,23 @@
+{
+  "name": "@metalearn/feynman-workshop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@metalearn/ai": "0.1.0",
+    "@metalearn/core": "0.1.0",
+    "@metalearn/storage": "0.1.0",
+    "@metalearn/ui": "0.1.0",
+    "lucide-react": "^0.468.0",
+    "next": "16.2.6",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  }
+}
+
