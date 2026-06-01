@@ -24,7 +24,7 @@ test("MetaLearn OS completes the unified learning loop", async ({ page }) => {
   await page.getByPlaceholder("先回想，再看来源。不要直接复制。").fill("我把熟悉感当成了掌握，但没能说清机制。");
   await page.getByRole("button", { name: "错 A", exact: true }).click();
   await expect(page.getByText(/校准差距/)).toBeVisible();
-  await expect(page.getByText(/信心 5，结果 again/)).toBeVisible();
+  await expect(page.getByText(/信心 非常确定/)).toBeVisible();
 
   await page.goto("/explain");
   await expect(page.getByRole("heading", { name: "费曼解释" })).toBeVisible();
@@ -42,4 +42,48 @@ test("MetaLearn OS completes the unified learning loop", async ({ page }) => {
   await page.goto("/settings");
   await expect(page.getByText("未点击 AI 操作前不上传材料。")).toBeVisible();
   await expect(page.locator("body")).not.toContainText("保证变聪明");
+});
+
+test("MetaLearn OS creates a review card manually from material evidence", async ({ page }) => {
+  let aiCardCalls = 0;
+  await page.route("**/api/ai/cards", async (route) => {
+    aiCardCalls += 1;
+    await route.continue();
+  });
+
+  await page.goto("/library");
+  await page.getByRole("button", { name: /保存到资料库/ }).click();
+  await page.getByRole("link", { name: "我的学习材料" }).click();
+  await expect(page).toHaveURL(/\/library\/source_/);
+  const materialUrl = page.url();
+
+  await expect(page.getByRole("heading", { name: "我的学习材料" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "来源片段" })).toBeVisible();
+  await expect(page.getByText("复习证据")).toBeVisible();
+  await page.getByRole("button", { name: /用此片段建卡/ }).first().click();
+  await expect(page.getByText("从来源证据建卡")).toBeVisible();
+  await expect(page.getByText("将发送哪些内容")).not.toBeVisible();
+
+  await page.getByLabel("问题").fill("为什么高信心错误特别值得优先复盘？");
+  await page.getByLabel("预期答案").fill("因为它暴露了熟悉感和真实掌握之间的差距。");
+  await page.getByRole("button", { name: /保存候选题/ }).click();
+  await expect(page.getByText("已保存为候选题")).toBeVisible();
+  await page.getByRole("button", { name: /批准进入复习/ }).first().click();
+  await expect(page.getByText("已批准进入复习队列")).toBeVisible();
+
+  await page.goto("/review");
+  await expect(page.getByText("来源已隐藏。先主动提取，再在自评后查看证据。")).toBeVisible();
+  await page.locator("button").filter({ hasText: /^5$/ }).first().click();
+  await page.getByPlaceholder("先回想，再看来源。不要直接复制。").fill("我记得它能暴露熟悉感和掌握之间的差距。");
+  await page.getByRole("button", { name: "对 C", exact: true }).click();
+  await expect(page.getByText(/校准差距/)).toBeVisible();
+
+  await page.goto(materialUrl);
+  await expect(page.getByText("复习证据")).toBeVisible();
+  await expect(page.getByText(/信心 5/)).toBeVisible();
+  await expect(page.getByText("来源缺失，需要修复")).not.toBeVisible();
+  expect(aiCardCalls).toBe(0);
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
 });

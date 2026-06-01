@@ -8,6 +8,7 @@ import type {
   ActionResult,
   Card,
   CardCandidate,
+  CardType,
   CheckInFocusState,
   ConceptRelationType,
   ExplanationAttempt,
@@ -18,6 +19,7 @@ import type {
   ReviewLog,
   ReviewOutcome,
   SourceInputType,
+  SourceChunk,
   SourceDocument
 } from "@metalearn/core";
 import {
@@ -37,7 +39,8 @@ import {
   downloadTextFile,
   getMetaLearnDb,
   saveLearningEvent,
-  serializeExportPackage
+  serializeExportPackage,
+  validateCardCandidateEvidence
 } from "@metalearn/storage";
 import { deriveWorkspace, emptyWorkspaceState, sampleText, type WorkspaceState } from "./workspace-selectors";
 
@@ -48,6 +51,30 @@ interface PendingCardRequest {
   source: SourceDocument;
   requestedCount: number;
 }
+
+interface ManualCardForm {
+  isOpen: boolean;
+  sourceId: string;
+  sourceChunkId: string;
+  question: string;
+  expectedAnswer: string;
+  sourceQuote: string;
+  cardType: CardType;
+  difficulty: 1 | 2 | 3 | 4 | 5;
+  tagsText: string;
+}
+
+const emptyManualCardForm: ManualCardForm = {
+  isOpen: false,
+  sourceId: "",
+  sourceChunkId: "",
+  question: "",
+  expectedAnswer: "",
+  sourceQuote: "",
+  cardType: "mechanism",
+  difficulty: 3,
+  tagsText: ""
+};
 
 function result(ok: boolean, message: string, extra: Partial<ActionResult> = {}): ActionResult {
   return { ok, message, ...extra };
@@ -91,6 +118,7 @@ export function useMetaLearnWorkspace() {
   const [modelName, setModelName] = useState("schema-checked-fallback");
   const [aiPreview, setAiPreview] = useState<AIRequestPreview | null>(null);
   const [pendingCardRequest, setPendingCardRequest] = useState<PendingCardRequest | null>(null);
+  const [manualCardForm, setManualCardForm] = useState<ManualCardForm>(emptyManualCardForm);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -266,6 +294,88 @@ export function useMetaLearnWorkspace() {
     await loadData();
   }
 
+  function startManualCard(sourceId = activeSource?.id, chunkId?: string): ActionResult {
+    const source = state.sources.find((item) => item.id === sourceId);
+    if (!source) return setAction(result(false, "先选择一份材料，再手工建卡。"));
+    if (source.status === "archived") return setAction(result(false, "这份材料已归档，恢复后才能继续建卡。"));
+    const sourceChunks = state.chunks.filter((chunk) => chunk.sourceId === source.id).sort((left, right) => left.index - right.index);
+    const selectedChunk = sourceChunks.find((chunk) => chunk.id === chunkId) ?? sourceChunks[0];
+    if (!selectedChunk) return setAction(result(false, "这份材料没有可用来源片段，不能手工建卡。"));
+    setManualCardForm({
+      ...emptyManualCardForm,
+      isOpen: true,
+      sourceId: source.id,
+      sourceChunkId: selectedChunk.id,
+      sourceQuote: buildManualSourceQuote(selectedChunk),
+      tagsText: `${source.templateId}, mechanism`
+    });
+    return setAction(result(true, "已打开手工建卡表单。保存后仍需批准，才会进入复习队列。"));
+  }
+
+  function updateManualCardForm(patch: Partial<ManualCardForm>) {
+    setManualCardForm((current) => ({ ...current, ...patch }));
+  }
+
+  function selectManualCardChunk(chunkId: string): ActionResult {
+    const chunk = state.chunks.find((item) => item.id === chunkId);
+    if (!chunk) return setAction(result(false, "找不到所选来源片段。"));
+    setManualCardForm((current) => ({
+      ...current,
+      sourceChunkId: chunk.id,
+      sourceId: chunk.sourceId,
+      sourceQuote: buildManualSourceQuote(chunk)
+    }));
+    return setAction(result(true, `已选择来源片段 #${chunk.index + 1}。`));
+  }
+
+  function resetManualCardForm() {
+    setManualCardForm(emptyManualCardForm);
+  }
+
+  async function saveManualCandidate(): Promise<ActionResult> {
+    const source = state.sources.find((item) => item.id === manualCardForm.sourceId);
+    if (!source) return setAction(result(false, "找不到材料，无法保存手工候选题。"));
+    if (source.status === "archived") return setAction(result(false, "这份材料已归档，恢复后才能继续建卡。"));
+    const tags = manualCardForm.tagsText.split(/[,\n，]/).map((tag) => tag.trim()).filter(Boolean);
+    const timestamp = new Date().toISOString();
+    const candidate: CardCandidate = {
+      id: createId("cand_manual"),
+      question: manualCardForm.question.trim(),
+      expectedAnswer: manualCardForm.expectedAnswer.trim(),
+      sourceQuote: manualCardForm.sourceQuote.trim(),
+      cardType: manualCardForm.cardType,
+      difficulty: manualCardForm.difficulty,
+      tags,
+      sourceChunkId: manualCardForm.sourceChunkId.trim(),
+      status: "candidate",
+      createdAt: timestamp
+    };
+    const validation = validateCardCandidateEvidence(candidate, state.chunks);
+    if (!validation.ok) return setAction(result(false, validation.reason ?? "手工候选题没有通过来源验证。"));
+    const updatedSource: SourceDocument = {
+      ...source,
+      status: "candidates",
+      candidateCount: (source.candidateCount ?? 0) + 1,
+      lastWorkedAt: timestamp,
+      updatedAt: timestamp
+    };
+    const db = getMetaLearnDb();
+    await db.transaction("rw", db.cardCandidates, db.sourceDocuments, async () => {
+      await db.cardCandidates.put(candidate);
+      await db.sourceDocuments.put(updatedSource);
+    });
+    const eventId = createId("event");
+    await saveLearningEvent({ id: eventId, sourceId: source.id, appId: "metalearn-os", actionType: "manual_candidate_created", outcome: "saved", createdAt: timestamp });
+    setManualCardForm((current) => ({
+      ...current,
+      question: "",
+      expectedAnswer: "",
+      tagsText: current.tagsText || `${source.templateId}, ${current.cardType}`
+    }));
+    await loadData();
+    return setAction(result(true, "已保存为候选题。批准后才会进入复习队列。", { eventId }));
+  }
+
   async function rejectCandidate(candidate: CardCandidate): Promise<ActionResult> {
     await getMetaLearnDb().cardCandidates.put({ ...candidate, status: "rejected" });
     await saveLearningEvent({ id: createId("event"), appId: "metalearn-os", actionType: "candidate_rejected", outcome: "saved", createdAt: new Date().toISOString() });
@@ -274,9 +384,10 @@ export function useMetaLearnWorkspace() {
   }
 
   async function approveCandidate(candidate: CardCandidate): Promise<ActionResult> {
-    if (!candidate.sourceQuote.trim() || !candidate.sourceChunkId.trim()) return setAction(result(false, "没有来源片段的候选题不能进入复习队列。"));
+    const validation = validateCardCandidateEvidence(candidate, state.chunks);
+    if (!validation.ok) return setAction(result(false, validation.reason ?? "没有来源片段的候选题不能进入复习队列。"));
     const timestamp = new Date().toISOString();
-    const sourceId = state.chunks.find((chunk) => chunk.id === candidate.sourceChunkId)?.sourceId;
+    const sourceId = validation.chunk?.sourceId;
     const source = state.sources.find((item) => item.id === sourceId);
     const card: Card = {
       ...candidate,
@@ -302,12 +413,19 @@ export function useMetaLearnWorkspace() {
   }
 
   async function approveAllCandidates(): Promise<ActionResult> {
-    const approvable = derived.pendingCandidates.filter((candidate) => candidate.sourceQuote.trim() && candidate.sourceChunkId.trim());
+    const validationById = new Map(derived.pendingCandidates.map((candidate) => [candidate.id, validateCardCandidateEvidence(candidate, state.chunks)]));
+    const approvable = derived.pendingCandidates.filter((candidate) => validationById.get(candidate.id)?.ok);
+    const blocked = derived.pendingCandidates.length - approvable.length;
     for (const candidate of approvable) {
       await approveCandidate(candidate);
     }
     await loadData();
-    return setAction(result(true, `已批量批准 ${approvable.length} 张候选题。`));
+    if (approvable.length === 0) {
+      const firstFailure = [...validationById.values()].find((validation) => !validation.ok);
+      return setAction(result(false, firstFailure?.reason ?? "没有可批准的候选题。"));
+    }
+    const blockedText = blocked > 0 ? `，${blocked} 张因来源证据不足被跳过` : "";
+    return setAction(result(true, `已批量批准 ${approvable.length} 张候选题${blockedText}。`));
   }
 
   async function completeReview(outcome: ReviewOutcome): Promise<ActionResult> {
@@ -552,6 +670,57 @@ export function useMetaLearnWorkspace() {
     void saveLearningEvent({ id: createId("event"), appId: "metalearn-os", actionType: "data_exported", outcome: "exported", createdAt: new Date().toISOString() });
   }
 
+  async function exportMaterial(sourceId: string): Promise<ActionResult> {
+    const source = state.sources.find((item) => item.id === sourceId);
+    if (!source) return setAction(result(false, "找不到要导出的材料。"));
+    const chunks = state.chunks.filter((chunk) => chunk.sourceId === sourceId);
+    const chunkIds = new Set(chunks.map((chunk) => chunk.id));
+    const cards = state.cards.filter((card) => chunkIds.has(card.sourceChunkId));
+    const cardIds = new Set(cards.map((card) => card.id));
+    const reviews = state.logs.filter((log) => cardIds.has(log.cardId) || log.sourceId === sourceId);
+    const explanations = state.explanations.filter((attempt) => chunks.some((chunk) => attempt.sourceQuote && chunk.text.includes(attempt.sourceQuote)));
+    const candidates = state.candidates.filter((candidate) => chunkIds.has(candidate.sourceChunkId));
+    const payload = {
+      materials: [source],
+      chunks,
+      candidates,
+      cards,
+      reviews,
+      explanations
+    };
+    downloadTextFile(
+      `metalearn-material-${source.id}.json`,
+      serializeExportPackage(payload, createExportManifest(payload)),
+      "application/json"
+    );
+    const eventId = createId("event");
+    await saveLearningEvent({ id: eventId, sourceId, appId: "metalearn-os", actionType: "data_exported", outcome: "exported", createdAt: new Date().toISOString() });
+    return setAction(result(true, "已导出该材料的证据包。", { eventId }));
+  }
+
+  async function archiveSource(sourceId: string): Promise<ActionResult> {
+    const source = state.sources.find((item) => item.id === sourceId);
+    if (!source) return setAction(result(false, "找不到要归档的材料。"));
+    const timestamp = new Date().toISOString();
+    await getMetaLearnDb().sourceDocuments.put({ ...source, status: "archived", lastWorkedAt: timestamp, updatedAt: timestamp });
+    const eventId = createId("event");
+    await saveLearningEvent({ id: eventId, sourceId, appId: "metalearn-os", actionType: "source_archived", outcome: "saved", createdAt: timestamp });
+    await loadData();
+    return setAction(result(true, "材料已归档，证据、卡片和复习记录仍保留。", { eventId }));
+  }
+
+  async function restoreSource(sourceId: string): Promise<ActionResult> {
+    const source = state.sources.find((item) => item.id === sourceId);
+    if (!source) return setAction(result(false, "找不到要恢复的材料。"));
+    const timestamp = new Date().toISOString();
+    const nextStatus: SourceDocument["status"] = (source.approvedCardCount ?? 0) > 0 ? "reviewing" : (source.candidateCount ?? 0) > 0 ? "candidates" : "chunked";
+    await getMetaLearnDb().sourceDocuments.put({ ...source, status: nextStatus, lastWorkedAt: timestamp, updatedAt: timestamp });
+    const eventId = createId("event");
+    await saveLearningEvent({ id: eventId, sourceId, appId: "metalearn-os", actionType: "source_restored", outcome: "saved", createdAt: timestamp });
+    await loadData();
+    return setAction(result(true, "材料已恢复到可继续学习状态。", { eventId }));
+  }
+
   return {
     state,
     derived,
@@ -616,11 +785,17 @@ export function useMetaLearnWorkspace() {
     modelName,
     setModelName,
     aiPreview,
+    manualCardForm,
     importSource,
     prepareCandidateGeneration,
     confirmCandidateGeneration,
     cancelAIRequestPreview,
     updateCandidate,
+    startManualCard,
+    updateManualCardForm,
+    selectManualCardChunk,
+    resetManualCardForm,
+    saveManualCandidate,
     approveCandidate,
     approveAllCandidates,
     rejectCandidate,
@@ -635,6 +810,9 @@ export function useMetaLearnWorkspace() {
     saveAIConfig,
     resetLocalData,
     exportJson,
+    exportMaterial,
+    archiveSource,
+    restoreSource,
     downloadCsv: () => downloadTextFile("metalearn-cards.csv", cardsToCsv(state.cards), "text/csv;charset=utf-8"),
     downloadAnki: () => downloadTextFile("metalearn-anki.tsv", candidatesToAnkiTsv(state.cards), "text/tab-separated-values;charset=utf-8")
   };
@@ -650,4 +828,8 @@ function deriveGapTags(scores: ExplanationAttempt["rubricScores"] | null): strin
 function scoreAverage(scores: ExplanationAttempt["rubricScores"]): number {
   const values = Object.values(scores);
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function buildManualSourceQuote(chunk: SourceChunk): string {
+  return chunk.text.replace(/\s+/g, " ").trim().slice(0, 260);
 }

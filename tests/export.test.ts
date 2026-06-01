@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Card, SourceDocument } from "@metalearn/core";
-import { buildStudyAssets, cardsToCsv, candidatesToAnkiTsv, createExportManifest, serializeExportPackage } from "@metalearn/storage";
+import type { Card, CardCandidate, SourceChunk, SourceDocument } from "@metalearn/core";
+import { buildStudyAssets, cardsToCsv, candidatesToAnkiTsv, createExportManifest, serializeExportPackage, validateCardCandidateEvidence } from "@metalearn/storage";
 import { createInitialFsrsState } from "@metalearn/learning-science";
 
 const card: Card = {
@@ -33,6 +33,26 @@ const source: SourceDocument = {
   updatedAt: "2026-05-31T00:00:00.000Z"
 };
 
+const chunk: SourceChunk = {
+  id: "chunk_1",
+  sourceId: "source_1",
+  index: 0,
+  text: "Spacing supports long-term retention."
+};
+
+const candidate: CardCandidate = {
+  id: "candidate_1",
+  question: "Why does spacing help long-term retention?",
+  expectedAnswer: "It creates effortful retrieval over time.",
+  sourceQuote: "Spacing supports long-term retention.",
+  cardType: "mechanism",
+  difficulty: 3,
+  tags: ["course", "spacing"],
+  sourceChunkId: "chunk_1",
+  status: "candidate",
+  createdAt: "2026-05-31T00:00:00.000Z"
+};
+
 describe("exports", () => {
   it("serializes export packages with schema v3 manifest metadata", () => {
     const manifest = createExportManifest({ materials: [source], cards: [card], reviews: [{}], aiRequestPreviews: [{}] });
@@ -59,10 +79,20 @@ describe("exports", () => {
   });
 
   it("builds a unified asset list for the MetaLearn OS library", () => {
-    const assets = buildStudyAssets({ sources: [source], candidates: [], cards: [card], explanations: [] });
+    const assets = buildStudyAssets({ sources: [source], chunks: [chunk], candidates: [], cards: [card], explanations: [] });
 
     expect(assets.map((asset) => asset.kind)).toEqual(["material", "card"]);
     expect(assets[0].statusLabel).toBe("reviewing");
-    expect(assets[1].href).toBe("/review");
+    expect(assets[0].href).toBe("/library/source_1");
+    expect(assets[1].href).toBe("/library/source_1");
+  });
+
+  it("rejects candidates that are not traceable to a source chunk", () => {
+    expect(validateCardCandidateEvidence(candidate, [chunk]).ok).toBe(true);
+    expect(validateCardCandidateEvidence({ ...candidate, sourceQuote: "" }, [chunk]).ok).toBe(false);
+    expect(validateCardCandidateEvidence({ ...candidate, sourceChunkId: "" }, [chunk]).ok).toBe(false);
+    expect(validateCardCandidateEvidence({ ...candidate, sourceChunkId: "missing" }, [chunk]).ok).toBe(false);
+    expect(validateCardCandidateEvidence({ ...candidate, sourceQuote: "Not from this source." }, [chunk]).ok).toBe(false);
+    expect(validateCardCandidateEvidence({ ...candidate, tags: [] }, [chunk]).ok).toBe(false);
   });
 });

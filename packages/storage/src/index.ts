@@ -184,6 +184,36 @@ export function createExportManifest(input: {
   };
 }
 
+export interface CandidateEvidenceValidation {
+  ok: boolean;
+  reason?: string;
+  chunk?: SourceChunk;
+}
+
+export function validateCardCandidateEvidence(candidate: CardCandidate, chunks: SourceChunk[]): CandidateEvidenceValidation {
+  const question = candidate.question.trim();
+  const expectedAnswer = candidate.expectedAnswer.trim();
+  const sourceQuote = candidate.sourceQuote.trim();
+  const sourceChunkId = candidate.sourceChunkId.trim();
+
+  if (question.length < 6) return { ok: false, reason: "问题至少需要 6 个字符。" };
+  if (expectedAnswer.length < 4) return { ok: false, reason: "预期答案不能为空。" };
+  if (!sourceQuote) return { ok: false, reason: "缺少来源证据，不能进入复习队列。" };
+  if (!sourceChunkId) return { ok: false, reason: "缺少来源片段 ID，不能进入复习队列。" };
+  if (candidate.tags.length === 0 || candidate.tags.every((tag) => !tag.trim())) return { ok: false, reason: "至少需要一个标签。" };
+
+  const chunk = chunks.find((item) => item.id === sourceChunkId);
+  if (!chunk) return { ok: false, reason: "来源片段不存在，请重新选择材料片段。" };
+
+  const normalizedQuote = normalizeEvidenceText(sourceQuote);
+  const normalizedChunk = normalizeEvidenceText(chunk.text);
+  if (!normalizedQuote || !normalizedChunk.includes(normalizedQuote)) {
+    return { ok: false, reason: "来源摘录必须来自所选材料片段。" };
+  }
+
+  return { ok: true, chunk };
+}
+
 export function serializeExportPackage(payload: unknown, manifest?: ExportManifest): string {
   return JSON.stringify(
     {
@@ -200,10 +230,16 @@ export function serializeExportPackage(payload: unknown, manifest?: ExportManife
 
 export function buildStudyAssets(input: {
   sources: SourceDocument[];
+  chunks?: SourceChunk[];
   candidates: CardCandidate[];
   cards: Card[];
   explanations: ExplanationAttempt[];
 }): StudyAsset[] {
+  const chunkById = new Map((input.chunks ?? []).map((chunk) => [chunk.id, chunk]));
+  const sourceHrefForChunk = (sourceChunkId: string) => {
+    const sourceId = chunkById.get(sourceChunkId)?.sourceId;
+    return sourceId ? `/library/${sourceId}` : undefined;
+  };
   const sourceAssets: StudyAsset[] = input.sources.map((source) => ({
     id: source.id,
     kind: "material",
@@ -211,7 +247,7 @@ export function buildStudyAssets(input: {
     detail: source.summary ?? `${source.rawText.slice(0, 120)}${source.rawText.length > 120 ? "..." : ""}`,
     templateId: source.templateId,
     sourceId: source.id,
-    href: `/library?source=${source.id}`,
+    href: `/library/${source.id}`,
     statusLabel: source.status ?? "new",
     updatedAt: source.lastWorkedAt ?? source.updatedAt
   }));
@@ -222,7 +258,8 @@ export function buildStudyAssets(input: {
       kind: "candidate",
       title: candidate.question,
       detail: candidate.sourceQuote,
-      href: "/review?panel=candidates",
+      sourceId: chunkById.get(candidate.sourceChunkId)?.sourceId,
+      href: sourceHrefForChunk(candidate.sourceChunkId) ?? "/review?panel=candidates",
       statusLabel: "待审核",
       updatedAt: candidate.createdAt
     }));
@@ -231,7 +268,8 @@ export function buildStudyAssets(input: {
     kind: "card",
     title: card.question,
     detail: `下次复习 ${new Date(card.dueAt).toLocaleDateString()}`,
-    href: "/review",
+    sourceId: chunkById.get(card.sourceChunkId)?.sourceId,
+    href: sourceHrefForChunk(card.sourceChunkId) ?? "/review",
     statusLabel: card.fsrs.reps > 0 ? "复习中" : "新卡",
     updatedAt: card.lastReviewedAt ?? card.createdAt
   }));
@@ -291,4 +329,8 @@ function csvEscape(value: string): string {
 
 function tsvEscape(value: string): string {
   return value.replace(/\t/g, " ").replace(/\n/g, "<br>");
+}
+
+function normalizeEvidenceText(value: string): string {
+  return value.replace(/\s+/g, "").trim().toLowerCase();
 }

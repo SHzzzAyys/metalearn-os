@@ -27,7 +27,7 @@ import {
   findHighConfidenceErrors,
   summarizeExplanationGaps
 } from "@metalearn/learning-science";
-import { buildStudyAssets } from "@metalearn/storage";
+import { buildStudyAssets, validateCardCandidateEvidence } from "@metalearn/storage";
 import type { ModuleNavItem } from "@metalearn/ui";
 
 export interface WorkspaceState {
@@ -106,6 +106,7 @@ export function deriveWorkspace(input: { state: WorkspaceState; now: Date; nowMs
   const highConfidenceErrors = findHighConfidenceErrors(state.cards, state.logs);
   const assets = buildStudyAssets({
     sources: state.sources,
+    chunks: state.chunks,
     candidates: state.candidates,
     cards: state.cards,
     explanations: state.explanations
@@ -136,6 +137,54 @@ export function deriveWorkspace(input: { state: WorkspaceState; now: Date; nowMs
 }
 
 export type WorkspaceDerived = ReturnType<typeof deriveWorkspace>;
+
+export function deriveMaterialDetail(state: WorkspaceState, sourceId: string) {
+  const source = state.sources.find((item) => item.id === sourceId);
+  const chunks = state.chunks.filter((chunk) => chunk.sourceId === sourceId).sort((left, right) => left.index - right.index);
+  const chunkIds = new Set(chunks.map((chunk) => chunk.id));
+  const pendingCandidates = state.candidates.filter((candidate) => candidate.status === "candidate" && chunkIds.has(candidate.sourceChunkId));
+  const rejectedCandidates = state.candidates.filter((candidate) => candidate.status === "rejected" && chunkIds.has(candidate.sourceChunkId));
+  const approvedCards = state.cards.filter((card) => chunkIds.has(card.sourceChunkId));
+  const approvedCardIds = new Set(approvedCards.map((card) => card.id));
+  const reviewLogs = state.logs.filter((log) => approvedCardIds.has(log.cardId) || log.sourceId === sourceId);
+  const explanations = state.explanations.filter((attempt) => chunks.some((chunk) => attempt.sourceQuote && chunk.text.includes(attempt.sourceQuote)));
+  const danglingCandidates = state.candidates.filter((candidate) => {
+    const validation = validateCardCandidateEvidence(candidate, state.chunks);
+    return !validation.ok && (!candidate.sourceChunkId || candidate.sourceChunkId.startsWith("chunk_"));
+  });
+  const danglingCards = state.cards.filter((card) => !state.chunks.some((chunk) => chunk.id === card.sourceChunkId));
+  const correctCount = reviewLogs.filter((log) => log.isCorrect).length;
+  const averageConfidence =
+    reviewLogs.length === 0 ? 0 : reviewLogs.reduce((sum, log) => sum + log.confidenceProbability, 0) / reviewLogs.length;
+
+  return {
+    source,
+    chunks,
+    pendingCandidates,
+    rejectedCandidates,
+    approvedCards,
+    reviewLogs,
+    explanations,
+    danglingCandidates,
+    danglingCards,
+    recentPerformance: {
+      reviewCount: reviewLogs.length,
+      brierScore: calculateBrierScore(reviewLogs),
+      averageConfidence,
+      accuracy: reviewLogs.length === 0 ? 0 : correctCount / reviewLogs.length,
+      highConfidenceErrorRate: calculateHighConfidenceErrorRate(reviewLogs),
+      highConfidenceErrorCount: reviewLogs.filter((log) => log.confidence >= 4 && !log.isCorrect).length
+    },
+    statusCounts: {
+      chunks: chunks.length,
+      pendingCandidates: pendingCandidates.length,
+      rejectedCandidates: rejectedCandidates.length,
+      approvedCards: approvedCards.length,
+      reviewLogs: reviewLogs.length,
+      explanations: explanations.length
+    }
+  };
+}
 
 export function resolveSourceForCard(card: Card | undefined, chunks: SourceChunk[], sources: SourceDocument[]) {
   if (!card) return undefined;

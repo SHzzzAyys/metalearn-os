@@ -22,7 +22,9 @@ import {
 } from "lucide-react";
 import type {
   AIRequestPreview,
+  Card,
   CardCandidate,
+  CardType,
   CheckInFocusState,
   ConceptRelationType,
   ExplanationAttempt,
@@ -30,11 +32,13 @@ import type {
   MistakeReason,
   ProductArea,
   ReviewOutcome,
+  SourceChunk,
   SourceDocument,
   SourceInputType
 } from "@metalearn/core";
 import { learningTemplates } from "@metalearn/core";
 import { buildCalibrationBuckets } from "@metalearn/learning-science";
+import { validateCardCandidateEvidence } from "@metalearn/storage";
 import type { StudyAsset } from "@metalearn/core";
 import {
   Badge,
@@ -58,11 +62,11 @@ import {
   TextLink
 } from "@metalearn/ui";
 import { useMetaLearnWorkspace } from "./use-metalearn-workspace";
-import { viewMeta } from "./workspace-selectors";
+import { deriveMaterialDetail, viewMeta } from "./workspace-selectors";
 
 type Workspace = ReturnType<typeof useMetaLearnWorkspace>;
 
-export function MetaLearnOSPage({ view }: { view: ProductArea }) {
+export function MetaLearnOSPage({ view, sourceId }: { view: ProductArea; sourceId?: string }) {
   const workspace = useMetaLearnWorkspace();
   const meta = viewMeta[view];
   const { derived, state } = workspace;
@@ -99,7 +103,18 @@ export function MetaLearnOSPage({ view }: { view: ProductArea }) {
   return (
     <ProductShell currentPath={meta.path} title={meta.title} subtitle={meta.subtitle} actions={actions} modules={derived.modules}>
       <div className="grid gap-5">
-        {workspace.error ? <InlineError message={workspace.error} /> : null}
+        {workspace.error ? (
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-900">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <span>{workspace.error}</span>
+              {view === "library" && state.sources.length > 0 ? (
+                <SecondaryButton className="!border-rose-200 !bg-white !text-rose-900 hover:!bg-rose-100" onClick={() => void workspace.startManualCard(sourceId ?? state.sources[0].id)}>
+                  <FileText size={16} /> 改为手工建卡
+                </SecondaryButton>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
         {workspace.lastAction?.ok ? <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-950">{workspace.lastAction.message}</div> : null}
         {workspace.isLoading ? <SkeletonPanel /> : null}
         <StatStrip
@@ -112,7 +127,7 @@ export function MetaLearnOSPage({ view }: { view: ProductArea }) {
         />
         {workspace.aiPreview ? <AIRequestPreviewPanel preview={workspace.aiPreview} onConfirm={workspace.confirmCandidateGeneration} onCancel={workspace.cancelAIRequestPreview} /> : null}
         {view === "home" ? <HomeView workspace={workspace} /> : null}
-        {view === "library" ? <LibraryView workspace={workspace} /> : null}
+        {view === "library" ? sourceId ? <MaterialDetailView workspace={workspace} sourceId={sourceId} /> : <LibraryView workspace={workspace} /> : null}
         {view === "review" ? <ReviewView workspace={workspace} /> : null}
         {view === "explain" ? <ExplainView workspace={workspace} /> : null}
         {view === "compass" ? <CompassView workspace={workspace} /> : null}
@@ -230,8 +245,12 @@ function LibraryView({ workspace }: { workspace: Workspace }) {
           <SecondaryButton onClick={() => void workspace.prepareCandidateGeneration(state.sources[0])}>
             <Sparkles size={16} /> 为最近材料生成候选题
           </SecondaryButton>
+          <SecondaryButton onClick={() => void workspace.startManualCard(state.sources[0]?.id)}>
+            <FileText size={16} /> 手工建卡
+          </SecondaryButton>
         </div>
         <MaterialStatusFlow sources={state.sources} />
+        {workspace.manualCardForm.isOpen ? <ManualCardPanel workspace={workspace} /> : null}
       </Panel>
       <Panel>
         <h3 className="text-2xl font-semibold tracking-[-0.02em]">资产搜索</h3>
@@ -263,28 +282,145 @@ function LibraryView({ workspace }: { workspace: Workspace }) {
         <div className="mt-5 grid gap-4 lg:grid-cols-2">
           {derived.pendingCandidates.length === 0 ? <EmptyState title="没有候选题" detail="先为一份材料生成候选题。无来源片段的问题会被挡在队列外。" /> : null}
           {derived.pendingCandidates.slice(0, 8).map((candidate: CardCandidate) => (
-            <article key={candidate.id} className="rounded-[1.25rem] bg-white/75 p-4 shadow-sm">
-              <div className="flex items-center gap-2">
-                <Badge>{candidate.cardType}</Badge>
-                <span className="text-xs text-zinc-500">难度 {candidate.difficulty}</span>
-              </div>
-              <div className="mt-3 grid gap-3">
-                <TextInput value={candidate.question} onChange={(event) => void workspace.updateCandidate(candidate, { question: event.target.value })} />
-                <TextArea value={candidate.expectedAnswer} onChange={(event) => void workspace.updateCandidate(candidate, { expectedAnswer: event.target.value })} />
-                <EvidenceCard quote={candidate.sourceQuote} />
-                <div className="flex flex-wrap gap-2">
-                  <Button onClick={() => void workspace.approveCandidate(candidate)}>
-                    <Check size={16} /> 批准进入复习
-                  </Button>
-                  <SecondaryButton onClick={() => void workspace.rejectCandidate(candidate)}>
-                    <X size={16} /> 拒绝
-                  </SecondaryButton>
-                </div>
-              </div>
-            </article>
+            <CandidateEditor key={candidate.id} candidate={candidate} workspace={workspace} />
           ))}
         </div>
       </Panel>
+    </section>
+  );
+}
+
+function MaterialDetailView({ workspace, sourceId }: { workspace: Workspace; sourceId: string }) {
+  const detail = deriveMaterialDetail(workspace.state, sourceId);
+  const source = detail.source;
+  if (workspace.isLoading) return <SkeletonPanel />;
+  if (!source) {
+    return (
+      <EmptyState
+        title="找不到这份材料"
+        detail="这个材料 ID 不在本地资料库里。它可能已经被删除，或当前浏览器没有这份 IndexedDB 数据。"
+        action={<TextLink href="/library">返回资料库</TextLink>}
+      />
+    );
+  }
+
+  const archived = source.status === "archived";
+  const canWork = !archived && detail.chunks.length > 0;
+  return (
+    <section className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid min-w-0 gap-5">
+        <Panel>
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap gap-2">
+                <Badge>{source.status ?? "new"}</Badge>
+                <Badge>{source.templateId}</Badge>
+                <Badge>{source.inputType ?? "plain_text"}</Badge>
+              </div>
+              <h3 className="mt-3 break-words text-3xl font-semibold tracking-[-0.03em] text-zinc-950">{source.title}</h3>
+              <p className="mt-2 max-w-[78ch] break-words text-sm leading-6 text-zinc-600">{source.summary ?? source.rawText.slice(0, 220)}</p>
+              <p className="mt-3 text-xs text-zinc-500">创建 {formatDate(source.createdAt)} · 最近工作 {formatDate(source.lastWorkedAt ?? source.updatedAt)}</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {canWork ? (
+                <>
+                  <Button onClick={() => void workspace.prepareCandidateGeneration(source)}>
+                    <Sparkles size={16} /> 生成候选题
+                  </Button>
+                  <SecondaryButton onClick={() => void workspace.startManualCard(source.id, detail.chunks[0]?.id)}>
+                    <FileText size={16} /> 手工建卡
+                  </SecondaryButton>
+                </>
+              ) : null}
+              <SecondaryButton onClick={() => void workspace.exportMaterial(source.id)}>
+                <Download size={16} /> 导出材料
+              </SecondaryButton>
+              {archived ? (
+                <SecondaryButton onClick={() => void workspace.restoreSource(source.id)}>
+                  <Archive size={16} /> 恢复
+                </SecondaryButton>
+              ) : (
+                <SecondaryButton onClick={() => void workspace.archiveSource(source.id)}>
+                  <Archive size={16} /> 归档
+                </SecondaryButton>
+              )}
+            </div>
+          </div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <MaterialStat label="片段" value={detail.statusCounts.chunks} />
+            <MaterialStat label="待审" value={detail.statusCounts.pendingCandidates} />
+            <MaterialStat label="卡片" value={detail.statusCounts.approvedCards} />
+            <MaterialStat label="复习" value={detail.statusCounts.reviewLogs} />
+            <MaterialStat label="解释" value={detail.statusCounts.explanations} />
+          </div>
+          {archived ? <InlineError message="这份材料已归档。证据仍可查看，但生成候选题和手工建卡已暂停。" /> : null}
+          {!archived && detail.chunks.length === 0 ? <InlineError message="这份材料没有可用来源片段。请重新导入文本层材料。" /> : null}
+          {workspace.manualCardForm.isOpen && workspace.manualCardForm.sourceId === source.id ? <ManualCardPanel workspace={workspace} /> : null}
+        </Panel>
+
+        <Panel>
+          <SectionHeader title="来源片段" detail="每张候选题和复习卡都必须能回到这里的 chunk。" />
+          <div className="mt-5 grid gap-3">
+            {detail.chunks.length === 0 ? <EmptyState title="没有来源片段" detail="这份材料没有 chunk，不能生成或手工创建可追踪卡片。" /> : null}
+            {detail.chunks.map((chunk) => (
+              <ChunkPanel key={chunk.id} chunk={chunk} disabled={archived} onManualCard={() => void workspace.startManualCard(source.id, chunk.id)} />
+            ))}
+          </div>
+        </Panel>
+
+        <Panel>
+          <SectionHeader title="候选题审核" detail="这里只显示属于当前材料的候选题。无来源证据时不能批准。" />
+          <div className="mt-5 grid gap-4 lg:grid-cols-2">
+            {detail.pendingCandidates.length === 0 ? <EmptyState title="当前材料没有待审候选题" detail="可以从来源片段手工建卡，也可以先生成 AI 候选题再审核。" /> : null}
+            {detail.pendingCandidates.map((candidate) => (
+              <CandidateEditor key={candidate.id} candidate={candidate} workspace={workspace} />
+            ))}
+          </div>
+        </Panel>
+
+        <Panel>
+          <SectionHeader title="已批准卡片" detail="这些卡片已经进入复习队列，仍保留来源片段和摘录。" />
+          <div className="mt-5 grid gap-4 lg:grid-cols-2">
+            {detail.approvedCards.length === 0 ? <EmptyState title="还没有批准卡片" detail="候选题批准后会出现在这里，并进入校准复习。" /> : null}
+            {detail.approvedCards.map((card) => (
+              <ApprovedCardEvidence key={card.id} card={card} chunks={workspace.state.chunks} />
+            ))}
+          </div>
+        </Panel>
+      </div>
+
+      <aside className="grid gap-5 xl:sticky xl:top-5 xl:self-start">
+        <Panel>
+          <SectionHeader title="复习证据" detail="数据不足时不生成虚假洞察。" />
+          <div className="mt-5 grid gap-4">
+            {detail.recentPerformance.reviewCount === 0 ? (
+              <EmptyState title="证据不足" detail="完成至少一次复习后，这里才会显示校准指标。" />
+            ) : (
+              <>
+                <ProgressRing value={Math.max(0, 1 - detail.recentPerformance.brierScore)} label={`Brier ${detail.recentPerformance.brierScore.toFixed(3)}`} />
+                <ProgressRing value={detail.recentPerformance.accuracy} label={`正确率 ${Math.round(detail.recentPerformance.accuracy * 100)}%`} />
+                <ProgressRing value={1 - detail.recentPerformance.highConfidenceErrorRate} label={`高信心错误 ${detail.recentPerformance.highConfidenceErrorCount}`} />
+              </>
+            )}
+            <div className="grid gap-2">
+              {detail.reviewLogs.slice(-5).reverse().map((log) => (
+                <div key={log.id} className="rounded-2xl bg-white/70 p-3 text-sm leading-6 text-zinc-700">
+                  <p className="font-semibold text-zinc-950">信心 {log.confidence} · {log.outcome}</p>
+                  <p>证据 {log.evidenceStrength ?? "unknown"} · {formatDate(log.createdAt)}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Panel>
+        <Panel>
+          <SectionHeader title="证据健康" detail="发现悬空引用时，应优先修复来源。" />
+          <div className="mt-4 grid gap-3 text-sm text-zinc-700">
+            <EvidenceHealthLine label="当前材料 chunk" value={detail.chunks.length} />
+            <EvidenceHealthLine label="全局悬空候选" value={detail.danglingCandidates.length} tone={detail.danglingCandidates.length ? "danger" : "neutral"} />
+            <EvidenceHealthLine label="全局悬空卡片" value={detail.danglingCards.length} tone={detail.danglingCards.length ? "danger" : "neutral"} />
+          </div>
+        </Panel>
+      </aside>
     </section>
   );
 }
@@ -336,7 +472,7 @@ function ReviewView({ workspace }: { workspace: Workspace }) {
         <h3 className="text-2xl font-semibold tracking-[-0.02em]">队列与错误</h3>
         <div className="mt-4 grid gap-3">
           {derived.reviewQueue.slice(0, 6).map((item) => (
-            <DocumentCard key={item.card.id} title={item.card.question} detail={`${item.source?.title ?? "解释版本或未知来源"} · ${item.reason}`} meta={item.card.dueAt.slice(0, 10)} status={item.urgency} href="/review" />
+            <DocumentCard key={item.card.id} title={item.card.question} detail={`${item.source?.title ?? "来源缺失，需要修复"} · ${item.reason}`} meta={item.card.dueAt.slice(0, 10)} status={item.urgency} href={item.source ? `/library/${item.source.id}` : "/review"} />
           ))}
           <p className="mt-2 text-sm font-semibold text-zinc-950">高信心错误工作流</p>
           {derived.highConfidenceErrors.length === 0 ? <p className="text-sm text-zinc-500">暂无高信心错误。</p> : null}
@@ -629,6 +765,169 @@ function SettingsView({ workspace }: { workspace: Workspace }) {
   );
 }
 
+function ManualCardPanel({ workspace }: { workspace: Workspace }) {
+  const form = workspace.manualCardForm;
+  const source = workspace.state.sources.find((item) => item.id === form.sourceId);
+  const chunks = workspace.state.chunks.filter((chunk) => chunk.sourceId === form.sourceId).sort((left, right) => left.index - right.index);
+  if (!form.isOpen || !source) return null;
+  return (
+    <div className="mt-5 rounded-[1.25rem] border border-emerald-200 bg-emerald-50/55 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <Badge>手工候选题</Badge>
+          <h4 className="mt-2 text-xl font-semibold tracking-[-0.02em] text-zinc-950">从来源证据建卡</h4>
+          <p className="mt-1 text-sm leading-6 text-zinc-600">不调用 AI。保存后先进入候选题审核台，批准后才会进入复习队列。</p>
+        </div>
+        <SecondaryButton onClick={workspace.resetManualCardForm}>
+          <X size={16} /> 取消
+        </SecondaryButton>
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_170px_150px]">
+        <Field label="来源片段">
+          <select
+            className="min-h-11 min-w-0 rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 text-sm outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+            value={form.sourceChunkId}
+            onChange={(event) => void workspace.selectManualCardChunk(event.target.value)}
+          >
+            {chunks.map((chunk) => (
+              <option key={chunk.id} value={chunk.id}>片段 #{chunk.index + 1}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="题型">
+          <CardTypeSelect value={form.cardType} onChange={(value) => workspace.updateManualCardForm({ cardType: value, tagsText: syncTagsText(form.tagsText, value) })} />
+        </Field>
+        <Field label="难度">
+          <DifficultySelect value={form.difficulty} onChange={(difficulty) => workspace.updateManualCardForm({ difficulty })} />
+        </Field>
+      </div>
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <Field label="问题">
+          <TextInput value={form.question} onChange={(event) => workspace.updateManualCardForm({ question: event.target.value })} placeholder="用自己的话提出一个可提取问题" />
+        </Field>
+        <Field label="标签">
+          <TextInput value={form.tagsText} onChange={(event) => workspace.updateManualCardForm({ tagsText: event.target.value })} placeholder="course, mechanism" />
+        </Field>
+      </div>
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <Field label="预期答案">
+          <TextArea value={form.expectedAnswer} onChange={(event) => workspace.updateManualCardForm({ expectedAnswer: event.target.value })} />
+        </Field>
+        <Field label="来源摘录" hint="可以缩短，但必须来自所选片段。">
+          <TextArea value={form.sourceQuote} onChange={(event) => workspace.updateManualCardForm({ sourceQuote: event.target.value })} />
+        </Field>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button onClick={() => void workspace.saveManualCandidate()}>
+          <Save size={16} /> 保存候选题
+        </Button>
+        <TextLink href={`/library/${source.id}`}>查看材料工作台</TextLink>
+      </div>
+    </div>
+  );
+}
+
+function CandidateEditor({ candidate, workspace }: { candidate: CardCandidate; workspace: Workspace }) {
+  const validation = validateCardCandidateEvidence(candidate, workspace.state.chunks);
+  const chunk = validation.chunk ?? workspace.state.chunks.find((item) => item.id === candidate.sourceChunkId);
+  const source = chunk ? workspace.state.sources.find((item) => item.id === chunk.sourceId) : undefined;
+  return (
+    <article className="min-w-0 rounded-[1.25rem] bg-white/75 p-4 shadow-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge>{candidate.cardType}</Badge>
+        <span className="text-xs text-zinc-500">难度 {candidate.difficulty}</span>
+        <span className="text-xs text-zinc-500">{source ? `${source.title} · 片段 #${(chunk?.index ?? 0) + 1}` : "来源缺失，需要修复"}</span>
+      </div>
+      <div className="mt-3 grid gap-3">
+        <TextInput value={candidate.question} onChange={(event) => void workspace.updateCandidate(candidate, { question: event.target.value })} />
+        <TextArea value={candidate.expectedAnswer} onChange={(event) => void workspace.updateCandidate(candidate, { expectedAnswer: event.target.value })} />
+        <TextArea value={candidate.sourceQuote} onChange={(event) => void workspace.updateCandidate(candidate, { sourceQuote: event.target.value })} />
+        {validation.ok ? (
+          <EvidenceCard label={`来源证据${chunk ? ` · 片段 #${chunk.index + 1}` : ""}`} quote={candidate.sourceQuote} />
+        ) : (
+          <InlineError message={validation.reason ?? "来源证据无效。"} />
+        )}
+        <div className="flex flex-wrap gap-2">
+          <Button disabled={!validation.ok} onClick={() => void workspace.approveCandidate(candidate)}>
+            <Check size={16} /> 批准进入复习
+          </Button>
+          <SecondaryButton onClick={() => void workspace.rejectCandidate(candidate)}>
+            <X size={16} /> 拒绝
+          </SecondaryButton>
+          {source ? <TextLink href={`/library/${source.id}`}>回到材料</TextLink> : null}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function ApprovedCardEvidence({ card, chunks }: { card: Card; chunks: SourceChunk[] }) {
+  const chunk = chunks.find((item) => item.id === card.sourceChunkId);
+  return (
+    <article className="min-w-0 rounded-[1.25rem] bg-white/75 p-4 shadow-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge>{card.cardType}</Badge>
+        <span className="text-xs text-zinc-500">reps {card.fsrs.reps}</span>
+        <span className="text-xs text-zinc-500">due {formatDate(card.dueAt)}</span>
+      </div>
+      <h4 className="mt-3 break-words text-base font-semibold text-zinc-950">{card.question}</h4>
+      <p className="mt-2 break-words text-sm leading-6 text-zinc-600">{card.expectedAnswer}</p>
+      <EvidenceCard className="mt-3" label={chunk ? `来源证据 · 片段 #${chunk.index + 1}` : "来源缺失，需要修复"} quote={card.sourceQuote} />
+      <div className="mt-3 flex flex-wrap gap-2">
+        {card.tags.map((tag) => <Badge key={tag}>{tag}</Badge>)}
+      </div>
+    </article>
+  );
+}
+
+function ChunkPanel({ chunk, disabled, onManualCard }: { chunk: SourceChunk; disabled: boolean; onManualCard: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const text = expanded ? chunk.text : `${chunk.text.slice(0, 560)}${chunk.text.length > 560 ? "..." : ""}`;
+  return (
+    <article className="min-w-0 rounded-[1.25rem] border border-white/70 bg-white/70 p-4 shadow-sm">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <Badge>片段 #{chunk.index + 1}</Badge>
+          <p className="mt-3 break-words text-sm leading-6 text-zinc-700">{text}</p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {chunk.text.length > 560 ? <SecondaryButton onClick={() => setExpanded((current) => !current)}>{expanded ? "收起" : "展开"}</SecondaryButton> : null}
+          <Button disabled={disabled} onClick={onManualCard}>
+            <FileText size={16} /> 用此片段建卡
+          </Button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function MaterialStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-2xl bg-zinc-50 p-4">
+      <p className="text-xs font-semibold tracking-[0.08em] text-zinc-500">{label}</p>
+      <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-zinc-950">{value}</p>
+    </div>
+  );
+}
+
+function SectionHeader({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div>
+      <h3 className="text-2xl font-semibold tracking-[-0.02em] text-zinc-950">{title}</h3>
+      <p className="mt-1 max-w-[72ch] text-sm leading-6 text-zinc-600">{detail}</p>
+    </div>
+  );
+}
+
+function EvidenceHealthLine({ label, value, tone = "neutral" }: { label: string; value: number; tone?: "neutral" | "danger" }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-2xl bg-zinc-50 p-3">
+      <span>{label}</span>
+      <span className={tone === "danger" ? "font-mono font-semibold text-rose-700" : "font-mono font-semibold text-zinc-950"}>{value}</span>
+    </div>
+  );
+}
+
 function MaterialStatusFlow({ sources }: { sources: SourceDocument[] }) {
   const latest = sources[0];
   const steps = ["new", "chunked", "candidates", "reviewing", "explaining", "archived"];
@@ -657,6 +956,32 @@ function InputTypeSelect({ value, onChange }: { value: SourceInputType; onChange
       <option value="plain_text">纯文本</option>
       <option value="markdown">Markdown</option>
       <option value="pdf_text">PDF 文本层</option>
+    </select>
+  );
+}
+
+function CardTypeSelect({ value, onChange }: { value: CardType; onChange: (value: CardType) => void }) {
+  return (
+    <select className="min-h-11 rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 text-sm outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100" value={value} onChange={(event) => onChange(event.target.value as CardType)}>
+      <option value="definition">定义</option>
+      <option value="mechanism">机制</option>
+      <option value="comparison">比较</option>
+      <option value="application">应用</option>
+      <option value="counterexample">反例</option>
+      <option value="experiment">实验</option>
+      <option value="cloze">填空</option>
+    </select>
+  );
+}
+
+function DifficultySelect({ value, onChange }: { value: 1 | 2 | 3 | 4 | 5; onChange: (value: 1 | 2 | 3 | 4 | 5) => void }) {
+  return (
+    <select className="min-h-11 rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 text-sm outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100" value={value} onChange={(event) => onChange(Number(event.target.value) as 1 | 2 | 3 | 4 | 5)}>
+      <option value={1}>1 · 很易</option>
+      <option value={2}>2 · 较易</option>
+      <option value={3}>3 · 中等</option>
+      <option value={4}>4 · 较难</option>
+      <option value={5}>5 · 很难</option>
     </select>
   );
 }
@@ -730,4 +1055,17 @@ function rubricLabel(key: string): string {
 function scoreAverage(scores: ExplanationAttempt["rubricScores"]): number {
   const values = Object.values(scores);
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function formatDate(value?: string): string {
+  if (!value) return "暂无";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "暂无";
+  return date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+}
+
+function syncTagsText(current: string, cardType: CardType): string {
+  const tags = current.split(/[,\n，]/).map((tag) => tag.trim()).filter(Boolean);
+  if (tags.includes(cardType)) return tags.join(", ");
+  return [...tags.filter((tag) => !["definition", "mechanism", "comparison", "application", "counterexample", "experiment", "cloze"].includes(tag)), cardType].join(", ");
 }
