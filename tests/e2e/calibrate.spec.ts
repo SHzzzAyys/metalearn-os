@@ -136,6 +136,53 @@ test("MetaLearn OS restores a usable workspace from exported JSON", async ({ pag
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
+test("MetaLearn OS creates and resolves high-confidence repair tasks", async ({ page }) => {
+  await page.goto("/library");
+  await page.getByRole("button", { name: /保存到资料库/ }).click();
+  await expect(page.getByText(/已导入并分成/)).toBeVisible();
+  const materialLink = page.getByRole("link", { name: "我的学习材料" });
+  await expect(materialLink).toBeVisible();
+  await materialLink.click();
+  await page.getByRole("button", { name: /用此片段建卡/ }).first().click();
+  await page.getByLabel("问题").fill("为什么高信心错误特别值得优先复盘？");
+  await page.getByLabel("预期答案").fill("因为它暴露了熟悉感和真实掌握之间的差距。");
+  await page.getByRole("button", { name: /保存候选题/ }).click();
+  await page.getByRole("button", { name: /批准进入复习/ }).first().click();
+
+  await page.goto("/review");
+  await expect(page.getByRole("button", { name: "错 A", exact: true })).toBeDisabled();
+  await page.locator("button").filter({ hasText: /^5$/ }).first().click();
+  await expect(page.getByRole("button", { name: "错 A", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: /我需要先看来源/ }).click();
+  await expect(page.getByText("本轮已经提前查看来源，完成后会记录为弱提取证据。")).toBeVisible();
+  await page.getByPlaceholder("先回想，再看来源。不要直接复制。").fill("我以为会，但其实说不清机制。");
+  await page.getByRole("button", { name: "错 A", exact: true }).click();
+  await expect(page.getByText(/创建高信心错误修复任务/)).toBeVisible();
+  await expect(page.getByText(/证据强度 weak/)).toBeVisible();
+
+  await page.goto("/review/mistakes");
+  await expect(page.getByRole("heading", { name: "高信心错误", exact: true })).toBeVisible();
+  await expect(page.getByText("为什么高信心错误特别值得优先复盘？")).toBeVisible();
+  await page.getByRole("link", { name: /用费曼复盘/ }).click();
+  await expect(page).toHaveURL(/\/explain\?repairTaskId=/);
+  await expect(page.getByText("当前正在处理高信心错误修复任务")).toBeVisible();
+  await page.getByLabel("你的解释").fill("高信心错误值得复盘，因为它说明我把熟悉感误判成掌握。真正掌握要能主动说出机制、边界和例子。比如只觉得材料眼熟不算掌握，必须能解释为什么这个错因会出现，以及下一次如何避免。");
+  await page.getByRole("button", { name: /保存解释版本/ }).click();
+  await expect(page.getByText(/已保存/)).toBeVisible();
+
+  await page.goto("/review/mistakes");
+  await expect(page.getByText("in_progress")).toBeVisible();
+  await page.getByRole("button", { name: /生成补救卡/ }).click();
+  await expect(page.getByText("已生成补救候选题")).toBeVisible();
+  await page.getByRole("button", { name: /标记已解决/ }).click();
+  await expect(page.getByText("修复任务已标记为已完成")).toBeVisible();
+
+  await page.goto("/insights");
+  await expect(page.getByText("未解决高信心错误任务：0")).toBeVisible();
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+});
+
 test("MetaLearn OS rejects invalid JSON imports before writing data", async ({ page }) => {
   await page.goto("/library");
   await page.locator('input[type="file"]').setInputFiles({

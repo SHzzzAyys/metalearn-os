@@ -9,9 +9,13 @@ import type {
   InsightSnapshot,
   LearningSession,
   Reflection,
+  RepairTask,
+  RepairTaskResolution,
   ReviewLog,
+  ReviewEvent,
   ReviewOutcome,
   ReviewQueueItem,
+  ReviewStateMachine,
   SourceChunk,
   SourceDocument
 } from "@metalearn/core";
@@ -85,6 +89,108 @@ export const simplifiedFsrsAdapter: FsrsAdapter = {
   createInitialState: createInitialFsrsState,
   schedule: scheduleReview
 };
+
+export interface ReviewTransitionResult {
+  ok: boolean;
+  state: ReviewStateMachine;
+  error?: string;
+  outcome?: ReviewOutcome;
+}
+
+export function createReviewState(cardId?: string, now = new Date()): ReviewStateMachine {
+  return {
+    stage: cardId ? "confidence" : "idle",
+    cardId,
+    answerText: "",
+    sourceVisibleBeforeAnswer: false,
+    startedAt: cardId ? now.toISOString() : undefined
+  };
+}
+
+export function transitionReviewState(
+  state: ReviewStateMachine,
+  event: ReviewEvent,
+  payload: { cardId?: string; confidence?: 1 | 2 | 3 | 4 | 5; answerText?: string; now?: Date } = {}
+): ReviewTransitionResult {
+  const now = (payload.now ?? new Date()).toISOString();
+  const fail = (error: string): ReviewTransitionResult => ({ ok: false, state, error });
+  if (event === "cancel") return { ok: true, state: createReviewState(undefined, payload.now), outcome: undefined };
+  if (event === "start_card") return { ok: true, state: createReviewState(payload.cardId, payload.now) };
+
+  if (!state.cardId) return fail("当前没有复习卡片。");
+
+  if (event === "choose_confidence") {
+    if (state.stage !== "confidence") return fail("只能在信心阶段选择信心。");
+    if (!payload.confidence) return fail("请选择 1-5 档信心。");
+    return { ok: true, state: { ...state, stage: "answering", confidence: payload.confidence } };
+  }
+
+  if (event === "edit_answer") {
+    if (state.stage !== "answering" && state.stage !== "self_rating") return fail("只能在回答阶段编辑答案。");
+    const answerText = payload.answerText ?? "";
+    return { ok: true, state: { ...state, stage: answerText.trim().length >= 2 ? "self_rating" : "answering", answerText, answeredAt: answerText.trim().length >= 2 ? state.answeredAt ?? now : undefined } };
+  }
+
+  if (event === "mark_source_seen") {
+    if (state.stage === "feedback") return fail("反馈阶段已经可以查看来源。");
+    return { ok: true, state: { ...state, sourceVisibleBeforeAnswer: true } };
+  }
+
+  const outcomeByEvent: Partial<Record<ReviewEvent, ReviewOutcome>> = {
+    self_rate_again: "again",
+    self_rate_partial: "partial",
+    self_rate_correct: "correct",
+    self_rate_easy: "easy"
+  };
+  const outcome = outcomeByEvent[event];
+  if (outcome) {
+    if (state.stage !== "self_rating") return fail("必须先选择信心并输入答案，才能自评结果。");
+    if (!state.confidence) return fail("缺少信心预测。");
+    if (state.answerText.trim().length < 2) return fail("主动回答至少需要 2 个字符。");
+    return { ok: true, outcome, state: { ...state, stage: "feedback", feedbackAt: now } };
+  }
+
+  if (event === "next_card") {
+    if (state.stage !== "feedback") return fail("只有反馈阶段才能进入下一张。");
+    return { ok: true, state: createReviewState(payload.cardId ?? state.cardId, payload.now) };
+  }
+
+  return fail("不支持的复习状态转换。");
+}
+
+export function shouldCreateRepairTask(log: ReviewLog): log is ReviewLog & { confidence: 4 | 5; outcome: "again" | "partial" } {
+  return log.confidence >= 4 && (log.outcome === "again" || log.outcome === "partial");
+}
+
+export function createRepairTaskFromReview(input: {
+  id: string;
+  log: ReviewLog & { confidence: 4 | 5; outcome: "again" | "partial" };
+  card: Card;
+  sourceChunkId: string;
+  now?: Date;
+}): RepairTask {
+  const timestamp = (input.now ?? new Date()).toISOString();
+  return {
+    id: input.id,
+    reviewLogId: input.log.id,
+    cardId: input.card.id,
+    sourceId: input.log.sourceId,
+    sourceChunkId: input.sourceChunkId,
+    status: "open",
+    reason: input.log.mistakeReason ?? "unknown",
+    confidence: input.log.confidence,
+    outcome: input.log.outcome,
+    tagSnapshot: [...input.card.tags],
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    linkedRemedialCandidateIds: []
+  };
+}
+
+export function canResolveRepairTask(status: RepairTask["status"], resolution?: RepairTaskResolution): boolean {
+  if (status !== "resolved" && status !== "dismissed") return true;
+  return Boolean(resolution);
+}
 
 export function calculateBrierScore(logs: ReviewLog[]): number {
   if (logs.length === 0) return 0;

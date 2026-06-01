@@ -92,6 +92,7 @@ function workspaceState(overrides: Partial<WorkspaceState> = {}): WorkspaceState
     insights: [],
     aiConfigs: [],
     aiRequestPreviews: [],
+    repairTasks: [],
     ...overrides
   };
 }

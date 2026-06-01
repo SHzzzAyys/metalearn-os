@@ -14,9 +14,13 @@ import {
   deriveReviewEvidenceStrength,
   createInsightSnapshot,
   confidenceToJudgment,
+  createRepairTaskFromReview,
   createInitialFsrsState,
+  createReviewState,
   findWeakTags,
-  scheduleReview
+  scheduleReview,
+  shouldCreateRepairTask,
+  transitionReviewState
 } from "@metalearn/learning-science";
 
 const logs: ReviewLog[] = [
@@ -131,6 +135,47 @@ describe("learning science calculations", () => {
         sourceVisibleBeforeAnswer: true
       })
     ).toBe("weak");
+  });
+
+  it("enforces the confidence-first review state machine", () => {
+    const started = transitionReviewState(createReviewState(), "start_card", { cardId: "card_1", now: new Date("2026-06-01T00:00:00.000Z") });
+    expect(started.ok).toBe(true);
+    expect(started.state.stage).toBe("confidence");
+
+    const illegalSelfRate = transitionReviewState(started.state, "self_rate_again");
+    expect(illegalSelfRate.ok).toBe(false);
+    expect(illegalSelfRate.state).toEqual(started.state);
+
+    const confident = transitionReviewState(started.state, "choose_confidence", { confidence: 5 });
+    expect(confident.state.stage).toBe("answering");
+    const emptyAnswer = transitionReviewState(confident.state, "edit_answer", { answerText: " " });
+    expect(emptyAnswer.state.stage).toBe("answering");
+    const answered = transitionReviewState(confident.state, "edit_answer", { answerText: "I recall the mechanism." });
+    expect(answered.state.stage).toBe("self_rating");
+    const sourceSeen = transitionReviewState(answered.state, "mark_source_seen");
+    expect(sourceSeen.state.sourceVisibleBeforeAnswer).toBe(true);
+    const feedback = transitionReviewState(sourceSeen.state, "self_rate_again");
+    expect(feedback.ok).toBe(true);
+    expect(feedback.outcome).toBe("again");
+    expect(feedback.state.stage).toBe("feedback");
+    expect(transitionReviewState(answered.state, "next_card").ok).toBe(false);
+    expect(transitionReviewState(feedback.state, "next_card", { cardId: "card_2" }).state.cardId).toBe("card_2");
+  });
+
+  it("creates repair tasks only for high-confidence wrong or partial reviews", () => {
+    const highWrong = { ...logs[0], confidence: 5 as const, outcome: "again" as const, mistakeReason: "not_retrieved" as const };
+    const highPartial = { ...logs[0], id: "r_partial", confidence: 4 as const, outcome: "partial" as const };
+    const lowWrong = { ...logs[0], id: "r_low", confidence: 3 as const, outcome: "again" as const };
+
+    expect(shouldCreateRepairTask(highWrong)).toBe(true);
+    expect(shouldCreateRepairTask(highPartial)).toBe(true);
+    expect(shouldCreateRepairTask(lowWrong)).toBe(false);
+
+    const task = createRepairTaskFromReview({ id: "repair_1", log: highWrong, card, sourceChunkId: card.sourceChunkId, now: new Date("2026-06-01T00:00:00.000Z") });
+    expect(task.status).toBe("open");
+    expect(task.reason).toBe("not_retrieved");
+    expect(task.cardId).toBe(card.id);
+    expect(task.linkedRemedialCandidateIds).toEqual([]);
   });
 
   it("turns review, candidate, and explanation evidence into a daily plan", () => {

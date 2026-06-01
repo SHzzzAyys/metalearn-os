@@ -20,18 +20,24 @@ import type {
   LearningTemplateId,
   MistakeReason,
   Reflection,
+  RepairTaskResolution,
   ReviewLog,
   ReviewOutcome,
+  ReviewStateMachine,
   SourceInputType,
   SourceChunk,
   SourceDocument
 } from "@metalearn/core";
 import {
   confidenceToJudgment,
+  createRepairTaskFromReview,
   createInitialFsrsState,
+  createReviewState,
   deriveReviewEvidenceStrength,
   outcomeToCorrectness,
-  simplifiedFsrsAdapter
+  shouldCreateRepairTask,
+  simplifiedFsrsAdapter,
+  transitionReviewState
 } from "@metalearn/learning-science";
 import {
   cardsToCsv,
@@ -52,8 +58,6 @@ import {
   validateCardCandidateEvidence
 } from "@metalearn/storage";
 import { deriveWorkspace, emptyWorkspaceState, sampleText, type WorkspaceState } from "./workspace-selectors";
-
-type ReviewStage = "confidence" | "answer" | "feedback";
 
 interface PendingCardRequest {
   previewId: string;
@@ -113,10 +117,8 @@ export function useMetaLearnWorkspace() {
   const [searchQuery, setSearchQuery] = useState("");
   const [confidence, setConfidence] = useState<1 | 2 | 3 | 4 | 5>(3);
   const [effort, setEffort] = useState<1 | 2 | 3 | 4 | 5>(3);
-  const [answerText, setAnswerText] = useState("");
-  const [sourceVisibleBeforeAnswer, setSourceVisibleBeforeAnswer] = useState(false);
+  const [reviewMachine, setReviewMachine] = useState<ReviewStateMachine>(createReviewState());
   const [mistakeReason, setMistakeReason] = useState<MistakeReason>("unknown");
-  const [reviewStage, setReviewStage] = useState<ReviewStage>("confidence");
   const [revealedSourceQuote, setRevealedSourceQuote] = useState("");
   const [reviewFeedback, setReviewFeedback] = useState("还没有完成本轮校准复习。");
   const [concept, setConcept] = useState("间隔效应");
@@ -146,6 +148,7 @@ export function useMetaLearnWorkspace() {
   const [importStrategy, setImportStrategyState] = useState<ImportConflictStrategy>("keep_both");
   const [importReport, setImportReport] = useState<ImportReport | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [activeRepairTaskId, setActiveRepairTaskId] = useState("");
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -165,7 +168,8 @@ export function useMetaLearnWorkspace() {
       conceptEdges,
       insights,
       aiConfigs,
-      aiRequestPreviews
+      aiRequestPreviews,
+      repairTasks
     ] = await Promise.all([
       db.sourceDocuments.orderBy("createdAt").reverse().toArray(),
       db.sourceChunks.toArray(),
@@ -181,9 +185,10 @@ export function useMetaLearnWorkspace() {
       db.conceptEdges.orderBy("createdAt").reverse().toArray(),
       db.insightSnapshots.orderBy("createdAt").reverse().toArray(),
       db.aiProviderConfigs.orderBy("updatedAt").reverse().toArray(),
-      db.aiRequestPreviews.orderBy("createdAt").reverse().toArray()
+      db.aiRequestPreviews.orderBy("createdAt").reverse().toArray(),
+      db.repairTasks.orderBy("createdAt").reverse().toArray()
     ]);
-    setState({ sources, chunks, importJobs, candidates, cards, logs, sessions, checkIns, reflections, explanations, conceptNodes, conceptEdges, insights, aiConfigs, aiRequestPreviews });
+    setState({ sources, chunks, importJobs, candidates, cards, logs, sessions, checkIns, reflections, explanations, conceptNodes, conceptEdges, insights, aiConfigs, aiRequestPreviews, repairTasks });
     setNowMs(Date.now());
     setIsLoading(false);
   }, []);
@@ -202,6 +207,13 @@ export function useMetaLearnWorkspace() {
   const derived = useMemo(() => deriveWorkspace({ state, now, nowMs, searchQuery }), [state, now, nowMs, searchQuery]);
   const activeSource = state.sources[0];
   const activeCard = derived.activeCard;
+  const effectiveReviewMachine = useMemo(() => {
+    if (!activeCard) return reviewMachine.stage === "idle" ? reviewMachine : createReviewState();
+    if (reviewMachine.stage === "feedback") return reviewMachine;
+    if (reviewMachine.cardId === activeCard.id && reviewMachine.stage !== "idle") return reviewMachine;
+    return createReviewState(activeCard.id);
+  }, [activeCard, reviewMachine]);
+  const activeReviewCard = state.cards.find((card) => card.id === effectiveReviewMachine.cardId) ?? activeCard;
 
   function setAction(action: ActionResult) {
     setLastAction(action);
@@ -457,29 +469,39 @@ export function useMetaLearnWorkspace() {
 
   async function completeReview(outcome: ReviewOutcome): Promise<ActionResult> {
     if (!activeCard) return setAction(result(false, "当前没有可复习卡片。"));
-    if (reviewStage === "confidence") return setAction(result(false, "请先选择信心，再主动回答。"));
-    const judgment = confidenceToJudgment(confidence);
+    const eventByOutcome = {
+      again: "self_rate_again",
+      partial: "self_rate_partial",
+      correct: "self_rate_correct",
+      easy: "self_rate_easy"
+    } as const;
+    const transition = transitionReviewState(effectiveReviewMachine, eventByOutcome[outcome]);
+    if (!transition.ok || !transition.outcome) return setAction(result(false, transition.error ?? "复习状态不允许自评。"));
+    const selectedConfidence = transition.state.confidence ?? confidence;
+    const judgment = confidenceToJudgment(selectedConfidence);
     const timestamp = new Date().toISOString();
     const isCorrect = outcomeToCorrectness(outcome);
-    const inferredReason = isCorrect ? undefined : classifyMistakeReason(answerText, activeCard.sourceQuote);
+    const inferredReason = isCorrect ? undefined : classifyMistakeReason(transition.state.answerText, activeCard.sourceQuote);
+    const startedAt = transition.state.startedAt ? new Date(transition.state.startedAt).getTime() : Date.now() - 90_000;
+    const durationMs = Math.max(1_000, Date.now() - startedAt);
     const baseLog = {
-      answerText,
-      durationMs: 90_000,
+      answerText: transition.state.answerText,
+      durationMs,
       selfRatedEffort: effort,
-      sourceVisibleBeforeAnswer
+      sourceVisibleBeforeAnswer: transition.state.sourceVisibleBeforeAnswer
     };
     const log: ReviewLog = {
       id: createId("review"),
       cardId: activeCard.id,
       sourceId: state.chunks.find((chunk) => chunk.id === activeCard.sourceChunkId)?.sourceId ?? "unknown",
-      confidence,
+      confidence: selectedConfidence,
       confidenceProbability: judgment.probability,
-      answerText,
+      answerText: transition.state.answerText,
       outcome,
       isCorrect,
       mistakeReason: isCorrect ? undefined : mistakeReason === "unknown" ? inferredReason : mistakeReason,
       selfRatedEffort: effort,
-      sourceVisibleBeforeAnswer,
+      sourceVisibleBeforeAnswer: transition.state.sourceVisibleBeforeAnswer,
       evidenceStrength: deriveReviewEvidenceStrength(baseLog),
       durationMs: baseLog.durationMs,
       createdAt: timestamp
@@ -487,30 +509,66 @@ export function useMetaLearnWorkspace() {
     const updatedCard = simplifiedFsrsAdapter.schedule(activeCard, outcome, new Date(timestamp));
     const gap = Math.abs(judgment.probability - (isCorrect ? 1 : 0));
     const db = getMetaLearnDb();
-    await db.transaction("rw", db.reviewLogs, db.cards, async () => {
+    let repairTaskId: string | undefined;
+    await db.transaction("rw", db.reviewLogs, db.cards, db.repairTasks, async () => {
       await db.reviewLogs.put(log);
       await db.cards.put(updatedCard);
+      if (shouldCreateRepairTask(log)) {
+        const existing = await db.repairTasks.where("reviewLogId").equals(log.id).first();
+        if (!existing) {
+          repairTaskId = createId("repair");
+          await db.repairTasks.put(createRepairTaskFromReview({ id: repairTaskId, log, card: activeCard, sourceChunkId: activeCard.sourceChunkId, now: new Date(timestamp) }));
+        }
+      }
     });
-    await saveLearningEvent({ id: createId("event"), sourceId: log.sourceId, appId: "metalearn-os", actionType: "review_completed", confidence, outcome, durationMs: log.durationMs, createdAt: timestamp });
+    await saveLearningEvent({ id: createId("event"), sourceId: log.sourceId, appId: "metalearn-os", actionType: "review_completed", confidence: selectedConfidence, outcome, durationMs: log.durationMs, createdAt: timestamp });
+    if (repairTaskId) await saveLearningEvent({ id: createId("event"), sourceId: log.sourceId, appId: "metalearn-os", actionType: "repair_task_created", confidence: selectedConfidence, outcome, createdAt: timestamp });
     setReviewFeedback(`信心 ${judgment.label}，结果${isCorrect ? "答对" : "未掌握"}，校准差距 ${Math.round(gap * 100)}%，证据强度 ${log.evidenceStrength}。`);
     setRevealedSourceQuote(activeCard.sourceQuote);
-    setReviewStage("feedback");
-    setAnswerText("");
+    setReviewMachine(transition.state);
     setMistakeReason("unknown");
-    setSourceVisibleBeforeAnswer(false);
     await loadData();
-    return setAction(result(true, "本轮复习已记录，来源现在可见。"));
+    return setAction(result(true, repairTaskId ? "本轮复习已记录，并创建高信心错误修复任务。" : "本轮复习已记录，来源现在可见。"));
   }
 
   function chooseConfidence(value: 1 | 2 | 3 | 4 | 5) {
+    const transition = transitionReviewState(effectiveReviewMachine, "choose_confidence", { confidence: value });
+    if (!transition.ok) {
+      setAction(result(false, transition.error ?? "当前阶段不能选择信心。"));
+      return;
+    }
     setConfidence(value);
-    setReviewStage("answer");
+    setReviewMachine(transition.state);
+  }
+
+  function setReviewAnswer(value: string) {
+    const transition = transitionReviewState(effectiveReviewMachine, "edit_answer", { answerText: value });
+    if (!transition.ok) {
+      setAction(result(false, transition.error ?? "当前阶段不能编辑答案。"));
+      return;
+    }
+    setReviewMachine(transition.state);
+  }
+
+  function markSourceSeenBeforeAnswer() {
+    const transition = transitionReviewState(effectiveReviewMachine, "mark_source_seen");
+    if (!transition.ok) {
+      setAction(result(false, transition.error ?? "当前阶段不能提前查看来源。"));
+      return;
+    }
+    setRevealedSourceQuote(activeCard?.sourceQuote ?? "");
+    setReviewMachine(transition.state);
+    setAction(result(true, "已显示来源，本轮会记录为弱提取证据。"));
   }
 
   function startNextReview() {
-    setReviewStage("confidence");
+    const transition = transitionReviewState(effectiveReviewMachine, "next_card", { cardId: activeCard?.id });
+    if (!transition.ok) {
+      setAction(result(false, transition.error ?? "当前阶段不能进入下一张。"));
+      return;
+    }
     setRevealedSourceQuote("");
-    setAnswerText("");
+    setReviewMachine(createReviewState(activeCard?.id));
     setReviewFeedback("还没有完成本轮校准复习。");
   }
 
@@ -557,9 +615,13 @@ export function useMetaLearnWorkspace() {
       createdAt: timestamp
     };
     const db = getMetaLearnDb();
-    await db.transaction("rw", db.explanationAttempts, db.conceptNodes, async () => {
+    await db.transaction("rw", db.explanationAttempts, db.conceptNodes, db.repairTasks, async () => {
       await db.explanationAttempts.put(attempt);
       await db.conceptNodes.put({ id: `concept_explanation_${concept}`, label: concept, source: "explanation", sourceId: attempt.id, strength: scoreAverage(attempt.rubricScores), createdAt: timestamp, updatedAt: timestamp });
+      if (activeRepairTaskId) {
+        const task = await db.repairTasks.get(activeRepairTaskId);
+        if (task) await db.repairTasks.put({ ...task, status: "in_progress", linkedExplanationId: attempt.id, updatedAt: timestamp });
+      }
     });
     await saveLearningEvent({ id: createId("event"), appId: "metalearn-os", actionType: "explanation_attempted", outcome: "saved", durationMs: 180_000, createdAt: timestamp });
     await loadData();
@@ -573,10 +635,92 @@ export function useMetaLearnWorkspace() {
       ...candidate,
       tags: [...new Set([...candidate.tags, `explain-v${latest.versionIndex ?? 1}`])]
     }));
-    await getMetaLearnDb().cardCandidates.bulkPut(candidates);
+    const db = getMetaLearnDb();
+    await db.transaction("rw", db.cardCandidates, db.repairTasks, async () => {
+      await db.cardCandidates.bulkPut(candidates);
+      if (activeRepairTaskId) {
+        const task = await db.repairTasks.get(activeRepairTaskId);
+        if (task) {
+          await db.repairTasks.put({
+            ...task,
+            status: "in_progress",
+            linkedRemedialCandidateIds: [...new Set([...task.linkedRemedialCandidateIds, ...candidates.map((candidate) => candidate.id)])],
+            updatedAt: new Date().toISOString()
+          });
+        }
+      }
+    });
     await saveLearningEvent({ id: createId("event"), appId: "metalearn-os", actionType: "handoff_exported", outcome: "exported", createdAt: new Date().toISOString() });
     await loadData();
     return setAction(result(true, `已从解释版本 v${latest.versionIndex ?? 1} 生成 ${candidates.length} 张候选卡。`));
+  }
+
+  async function startRepairExplanation(taskId: string): Promise<ActionResult> {
+    const task = state.repairTasks.find((item) => item.id === taskId);
+    if (!task) return setAction(result(false, "找不到修复任务。"));
+    const card = state.cards.find((item) => item.id === task.cardId);
+    if (card) {
+      setConcept(card.tags[0] ?? "高信心错误");
+      setExplainQuote(card.sourceQuote);
+      setExplanation(`我需要重新解释这个高信心错误相关概念：${card.question}\n\n我的当前解释是：`);
+      setTemplateId(state.sources.find((source) => source.id === task.sourceId)?.templateId ?? templateId);
+    }
+    setActiveRepairTaskId(task.id);
+    const timestamp = new Date().toISOString();
+    await getMetaLearnDb().repairTasks.put({ ...task, status: "in_progress", updatedAt: timestamp });
+    await saveLearningEvent({ id: createId("event"), sourceId: task.sourceId, appId: "metalearn-os", actionType: "repair_task_updated", outcome: "saved", createdAt: timestamp });
+    await loadData();
+    return setAction(result(true, "已带入费曼解释工作台。"));
+  }
+
+  async function createRemedialCandidateForTask(taskId: string): Promise<ActionResult> {
+    const task = state.repairTasks.find((item) => item.id === taskId);
+    if (!task) return setAction(result(false, "找不到修复任务。"));
+    const card = state.cards.find((item) => item.id === task.cardId);
+    if (!card) return setAction(result(false, "找不到任务关联卡片。"));
+    const timestamp = new Date().toISOString();
+    const candidate: CardCandidate = {
+      id: createId("cand"),
+      question: `补救：${card.question}`,
+      expectedAnswer: card.expectedAnswer,
+      sourceQuote: card.sourceQuote,
+      cardType: card.cardType,
+      difficulty: Math.min(5, card.difficulty + 1) as 1 | 2 | 3 | 4 | 5,
+      tags: [...new Set([...card.tags, "repair"])],
+      sourceChunkId: task.sourceChunkId,
+      status: "candidate",
+      createdAt: timestamp
+    };
+    const db = getMetaLearnDb();
+    await db.transaction("rw", db.cardCandidates, db.repairTasks, async () => {
+      await db.cardCandidates.put(candidate);
+      await db.repairTasks.put({
+        ...task,
+        status: "in_progress",
+        linkedRemedialCandidateIds: [...new Set([...task.linkedRemedialCandidateIds, candidate.id])],
+        updatedAt: timestamp
+      });
+    });
+    await saveLearningEvent({ id: createId("event"), sourceId: task.sourceId, appId: "metalearn-os", actionType: "repair_task_updated", outcome: "saved", createdAt: timestamp });
+    await loadData();
+    return setAction(result(true, "已生成补救候选题，批准后才会进入复习队列。"));
+  }
+
+  async function updateRepairTask(taskId: string, status: "resolved" | "dismissed", resolution: RepairTaskResolution): Promise<ActionResult> {
+    const task = state.repairTasks.find((item) => item.id === taskId);
+    if (!task) return setAction(result(false, "找不到修复任务。"));
+    if (!resolution) return setAction(result(false, "关闭修复任务必须选择处理方式。"));
+    const timestamp = new Date().toISOString();
+    await getMetaLearnDb().repairTasks.put({
+      ...task,
+      status,
+      resolution,
+      resolvedAt: timestamp,
+      updatedAt: timestamp
+    });
+    await saveLearningEvent({ id: createId("event"), sourceId: task.sourceId, appId: "metalearn-os", actionType: "repair_task_resolved", outcome: "saved", createdAt: timestamp });
+    await loadData();
+    return setAction(result(true, status === "resolved" ? "修复任务已标记为已完成。" : "修复任务已忽略。"));
   }
 
   async function addConceptEdge(fromLabel: string, toLabel: string, relation: ConceptRelationType, evidence: string): Promise<ActionResult> {
@@ -759,7 +903,8 @@ export function useMetaLearnWorkspace() {
       checkIns: state.checkIns,
       reflections: state.reflections,
       insights: state.insights,
-      aiRequestPreviews: state.aiRequestPreviews
+      aiRequestPreviews: state.aiRequestPreviews,
+      repairTasks: state.repairTasks
     };
     downloadTextFile(
       "metalearn-os-export.json",
@@ -777,15 +922,18 @@ export function useMetaLearnWorkspace() {
     const cards = state.cards.filter((card) => chunkIds.has(card.sourceChunkId));
     const cardIds = new Set(cards.map((card) => card.id));
     const reviews = state.logs.filter((log) => cardIds.has(log.cardId) || log.sourceId === sourceId);
+    const reviewIds = new Set(reviews.map((log) => log.id));
     const explanations = state.explanations.filter((attempt) => chunks.some((chunk) => attempt.sourceQuote && chunk.text.includes(attempt.sourceQuote)));
     const candidates = state.candidates.filter((candidate) => chunkIds.has(candidate.sourceChunkId));
+    const repairTasks = state.repairTasks.filter((task) => task.sourceId === sourceId || reviewIds.has(task.reviewLogId));
     const payload = {
       materials: [source],
       chunks,
       candidates,
       cards,
       reviews,
-      explanations
+      explanations,
+      repairTasks
     };
     downloadTextFile(
       `metalearn-material-${source.id}.json`,
@@ -841,13 +989,15 @@ export function useMetaLearnWorkspace() {
     chooseConfidence,
     effort,
     setEffort,
-    answerText,
-    setAnswerText,
-    sourceVisibleBeforeAnswer,
-    setSourceVisibleBeforeAnswer,
+    reviewMachine: effectiveReviewMachine,
+    activeReviewCard,
+    answerText: effectiveReviewMachine.answerText,
+    setAnswerText: setReviewAnswer,
+    sourceVisibleBeforeAnswer: effectiveReviewMachine.sourceVisibleBeforeAnswer,
+    markSourceSeenBeforeAnswer,
     mistakeReason,
     setMistakeReason,
-    reviewStage,
+    reviewStage: effectiveReviewMachine.stage,
     revealedSourceQuote,
     reviewFeedback,
     startNextReview,
@@ -891,6 +1041,8 @@ export function useMetaLearnWorkspace() {
     importStrategy,
     importReport,
     isImporting,
+    activeRepairTaskId,
+    setActiveRepairTaskId,
     importSource,
     prepareCandidateGeneration,
     confirmCandidateGeneration,
@@ -905,6 +1057,9 @@ export function useMetaLearnWorkspace() {
     approveAllCandidates,
     rejectCandidate,
     completeReview,
+    startRepairExplanation,
+    createRemedialCandidateForTask,
+    updateRepairTask,
     askSocraticQuestions,
     saveExplanation,
     handoffExplanation,
@@ -960,6 +1115,7 @@ function buildCurrentImportPayload(state: WorkspaceState): ImportPackagePayload 
     reflections: state.reflections,
     insights: state.insights,
     aiProviderConfigs: state.aiConfigs,
-    aiRequestPreviews: state.aiRequestPreviews
+    aiRequestPreviews: state.aiRequestPreviews,
+    repairTasks: state.repairTasks
   };
 }

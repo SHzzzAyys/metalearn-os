@@ -1,6 +1,6 @@
 # Data Model
 
-MetaLearn OS stores user learning data locally in IndexedDB. The current schema version is `v3`.
+MetaLearn OS stores user learning data locally in IndexedDB. The current schema version is `v4`.
 
 ## Core Tables
 
@@ -15,6 +15,7 @@ Cards and review:
 - `cardCandidates`: AI-generated or explanation-generated candidate cards.
 - `cards`: approved cards in the review queue.
 - `reviewLogs`: confidence prediction, answer, outcome, mistake reason, and evidence strength.
+- `repairTasks`: high-confidence wrong or partial reviews that need source review, explanation, or remedial card creation.
 
 Planning:
 
@@ -77,6 +78,18 @@ Signals include:
 
 If the source was visible before answer, the review should be treated as weak extraction evidence even when the user marks the answer correct.
 
+## Repair Tasks
+
+High-confidence repair tasks are created when a review has confidence `4` or `5` and the user marks the outcome as `again` or `partial`.
+
+Repair tasks:
+
+- point to the review log, card, source, and source chunk;
+- keep a snapshot of the card tags and mistake reason;
+- can be `open`, `in_progress`, `resolved`, or `dismissed`;
+- may link to one Feynman explanation and remedial candidate cards;
+- do not mean the system has judged mastery. Closing a task only records that a repair action was completed or dismissed.
+
 ## Export Package
 
 Export packages should include:
@@ -90,6 +103,7 @@ Export packages should include:
 - candidates;
 - cards;
 - reviews;
+- repair tasks;
 - sessions;
 - check-ins;
 - reflections;
@@ -101,7 +115,7 @@ Export packages should include:
 
 ## Import and Restore
 
-The current restore format is the same schema `v3` JSON package produced by the app. The importer recognizes:
+The current restore format is the same schema `v4` JSON package produced by the app. The importer also accepts schema `v3` packages and treats missing `repairTasks` as an empty array. The importer recognizes:
 
 - `full_backup`: a full local workspace export;
 - `material_package`: one material plus its related chunks, candidates, cards, reviews, explanations, sessions, insights, and audit records;
@@ -121,13 +135,14 @@ The importer must not mutate IndexedDB during parse, validation, or preview. A f
 
 Import validation checks:
 
-- `schemaVersion` must equal `3`;
+- `schemaVersion` must equal `3` or `4`;
 - manifest counts should match payload counts, otherwise a warning is shown;
 - `SourceChunk.sourceId` must resolve to a material;
 - `CardCandidate.sourceChunkId` must resolve to a chunk;
 - `Card.sourceChunkId` must resolve to a chunk;
 - `ReviewLog.cardId` must resolve to a card;
 - `ReviewLog.sourceId` must resolve to a material, or be repairable through `cardId -> card.sourceChunkId -> chunk.sourceId`;
+- `RepairTask.reviewLogId`, `cardId`, `sourceId`, and `sourceChunkId` must resolve to imported records;
 - candidate and card `sourceQuote` must be present and match the referenced chunk text;
 - source-grounded cards without valid evidence are rejected.
 
@@ -147,6 +162,7 @@ The importer does not support overwrite. This is deliberate: local learning reco
 For future schema versions:
 
 - migrations must be additive where possible;
-- old exports should remain readable or clearly rejected with an actionable message;
+- v3 exports should remain readable with `repairTasks` defaulting to an empty array;
+- older unsupported exports should be clearly rejected with an actionable message;
 - dangling references should be detected by integrity checks;
 - migration tests must cover representative v3 data.

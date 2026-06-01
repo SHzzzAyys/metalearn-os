@@ -30,7 +30,7 @@ Confirmation must happen before generation.
 
 ## Export and Delete
 
-The export package is a local download. It may include user materials, review logs, explanations, reflections, and AI request records. Users should treat it as sensitive data.
+The export package is a local download. It may include user materials, review logs, repair tasks, explanations, reflections, and AI request records. Users should treat it as sensitive data.
 
 Deletion should clear all local tables and should not leave a preserved deletion event in the cleared database.
 

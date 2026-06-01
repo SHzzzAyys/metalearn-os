@@ -20,6 +20,7 @@ import type {
   LearningEvent,
   LearningSession,
   Reflection,
+  RepairTask,
   ReviewLog,
   SourceChunk,
   SourceDocument,
@@ -42,6 +43,7 @@ export class MetaLearnDb extends Dexie {
   insightSnapshots!: Table<InsightSnapshot, string>;
   aiProviderConfigs!: Table<AIProviderConfig, string>;
   aiRequestPreviews!: Table<AIRequestPreview, string>;
+  repairTasks!: Table<RepairTask, string>;
   learningEvents!: Table<LearningEvent, string>;
 
   constructor() {
@@ -88,6 +90,25 @@ export class MetaLearnDb extends Dexie {
       aiRequestPreviews: "id, kind, sourceId, providerMode, status, createdAt",
       learningEvents: "id, appId, sourceId, actionType, createdAt"
     });
+    this.version(4).stores({
+      sourceDocuments: "id, templateId, status, lastWorkedAt, createdAt",
+      sourceChunks: "id, sourceId, index",
+      importJobs: "id, sourceId, inputType, status, createdAt",
+      cardCandidates: "id, sourceChunkId, status, createdAt",
+      cards: "id, sourceChunkId, dueAt, createdAt",
+      reviewLogs: "id, cardId, sourceId, confidence, mistakeReason, evidenceStrength, createdAt",
+      learningSessions: "id, templateId, startedAt, endedAt",
+      checkIns: "id, sessionId, focusState, createdAt",
+      reflections: "id, sessionId, createdAt",
+      explanationAttempts: "id, templateId, concept, parentAttemptId, createdAt",
+      conceptNodes: "id, label, source, sourceId, updatedAt",
+      conceptEdges: "id, fromNodeId, toNodeId, relation, confirmed, createdAt",
+      insightSnapshots: "id, createdAt",
+      aiProviderConfigs: "id, mode, providerName, updatedAt",
+      aiRequestPreviews: "id, kind, sourceId, providerMode, status, createdAt",
+      repairTasks: "id, status, reviewLogId, cardId, sourceId, sourceChunkId, reason, createdAt, updatedAt",
+      learningEvents: "id, appId, sourceId, actionType, createdAt"
+    });
   }
 }
 
@@ -128,6 +149,7 @@ export async function clearAllLocalData(): Promise<void> {
     currentDb.insightSnapshots.clear(),
     currentDb.aiProviderConfigs.clear(),
     currentDb.aiRequestPreviews.clear(),
+    currentDb.repairTasks.clear(),
     currentDb.learningEvents.clear()
   ]);
 }
@@ -169,10 +191,11 @@ export function createExportManifest(input: {
   checkIns?: unknown[];
   insights?: unknown[];
   aiRequestPreviews?: unknown[];
+  repairTasks?: unknown[];
 }): ExportManifest {
   const aiRequestPreviews = input.aiRequestPreviews?.length ?? 0;
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     exportedAt: new Date().toISOString(),
     counts: {
       materials: input.materials?.length ?? 0,
@@ -184,7 +207,8 @@ export function createExportManifest(input: {
       sessions: input.sessions?.length ?? 0,
       checkIns: input.checkIns?.length ?? 0,
       insights: input.insights?.length ?? 0,
-      aiRequestPreviews
+      aiRequestPreviews,
+      repairTasks: input.repairTasks?.length ?? 0
     },
     includesAIRequestRecords: aiRequestPreviews > 0
   };
@@ -224,8 +248,8 @@ export function serializeExportPackage(payload: unknown, manifest?: ExportManife
   return JSON.stringify(
     {
       exportedAt: new Date().toISOString(),
-      version: 3,
-      schemaVersion: 3,
+      version: 4,
+      schemaVersion: 4,
       manifest,
       payload
     },
@@ -285,8 +309,8 @@ export function validateImportPackage(pkg: ParsedImportPackage): ImportPreview {
   const fatalProblems: ImportProblem[] = [];
   const counts = countImportPayload(pkg.payload);
 
-  if (pkg.schemaVersion !== 3) {
-    fatalProblems.push(problem("unsupported_schema", "fatal", "package", undefined, "当前版本只支持 schemaVersion 3 的导出包。"));
+  if (pkg.schemaVersion !== 3 && pkg.schemaVersion !== 4) {
+    fatalProblems.push(problem("unsupported_schema", "fatal", "package", undefined, "当前版本只支持 schemaVersion 3 或 4 的导出包。"));
   }
   if (pkg.kind === "unknown") {
     fatalProblems.push(problem("unknown_package", "fatal", "package", undefined, "无法识别 MetaLearn OS 导入包类型。"));
@@ -296,7 +320,8 @@ export function validateImportPackage(pkg: ParsedImportPackage): ImportPreview {
   }
   if (pkg.manifest?.counts) {
     for (const key of Object.keys(counts) as Array<keyof ExportManifest["counts"]>) {
-      if (pkg.manifest.counts[key] !== counts[key]) {
+      const manifestValue = pkg.manifest.counts[key];
+      if (typeof manifestValue === "number" && manifestValue !== counts[key]) {
         warnings.push(problem("manifest_count_mismatch", "warning", "manifest", key, `${key} 计数与 payload 不一致。`));
       }
     }
@@ -305,6 +330,7 @@ export function validateImportPackage(pkg: ParsedImportPackage): ImportPreview {
   const sourceIds = new Set(pkg.payload.materials.map((source) => source.id));
   const chunkById = new Map(pkg.payload.chunks.map((chunk) => [chunk.id, chunk]));
   const cardById = new Map(pkg.payload.cards.map((card) => [card.id, card]));
+  const reviewIds = new Set(pkg.payload.reviews.map((review) => review.id));
 
   for (const chunk of pkg.payload.chunks) {
     if (!sourceIds.has(chunk.sourceId)) {
@@ -346,6 +372,21 @@ export function validateImportPackage(pkg: ParsedImportPackage): ImportPreview {
     const nodeIds = new Set(pkg.payload.conceptNodes.map((node) => node.id));
     if (!nodeIds.has(edge.fromNodeId) || !nodeIds.has(edge.toNodeId)) {
       warnings.push(problem("missing_concept_node", "warning", "conceptEdges", edge.id, `概念连接 ${edge.id} 有端点缺失，将作为弱证据导入。`));
+    }
+  }
+
+  for (const task of pkg.payload.repairTasks) {
+    if (!reviewIds.has(task.reviewLogId)) {
+      fatalProblems.push(problem("missing_repair_review", "fatal", "repairTasks", task.id, `修复任务 ${task.id} 指向不存在的复习记录 ${task.reviewLogId}。`));
+    }
+    if (!cardById.has(task.cardId)) {
+      fatalProblems.push(problem("missing_repair_card", "fatal", "repairTasks", task.id, `修复任务 ${task.id} 指向不存在的卡片 ${task.cardId}。`));
+    }
+    if (!sourceIds.has(task.sourceId)) {
+      fatalProblems.push(problem("missing_repair_source", "fatal", "repairTasks", task.id, `修复任务 ${task.id} 指向不存在的材料 ${task.sourceId}。`));
+    }
+    if (!chunkById.has(task.sourceChunkId)) {
+      fatalProblems.push(problem("missing_repair_chunk", "fatal", "repairTasks", task.id, `修复任务 ${task.id} 指向不存在的片段 ${task.sourceChunkId}。`));
     }
   }
 
@@ -412,7 +453,8 @@ export async function applyImportPlan(db: MetaLearnDb, plan: ImportPlan): Promis
       db.conceptEdges,
       db.insightSnapshots,
       db.aiProviderConfigs,
-      db.aiRequestPreviews
+      db.aiRequestPreviews,
+      db.repairTasks
     ],
     async () => {
       await bulkPutIfAny(db.sourceDocuments, inserts.materials);
@@ -430,6 +472,7 @@ export async function applyImportPlan(db: MetaLearnDb, plan: ImportPlan): Promis
       await bulkPutIfAny(db.insightSnapshots, inserts.insights);
       await bulkPutIfAny(db.aiProviderConfigs, inserts.aiProviderConfigs);
       await bulkPutIfAny(db.aiRequestPreviews, inserts.aiRequestPreviews);
+      await bulkPutIfAny(db.repairTasks, inserts.repairTasks);
     }
   );
 }
@@ -566,7 +609,8 @@ function emptyImportCounts(): ExportManifest["counts"] {
     sessions: 0,
     checkIns: 0,
     insights: 0,
-    aiRequestPreviews: 0
+    aiRequestPreviews: 0,
+    repairTasks: 0
   };
 }
 
@@ -586,7 +630,8 @@ export function emptyImportPayload(): ImportPackagePayload {
     reflections: [],
     insights: [],
     aiProviderConfigs: [],
-    aiRequestPreviews: []
+    aiRequestPreviews: [],
+    repairTasks: []
   };
 }
 
@@ -606,7 +651,8 @@ function normalizeImportPayload(payload: Record<string, unknown>): ImportPackage
     reflections: cloneArray<Reflection>(payload.reflections),
     insights: cloneArray<InsightSnapshot>(payload.insights),
     aiProviderConfigs: cloneArray<AIProviderConfig>(payload.aiProviderConfigs),
-    aiRequestPreviews: cloneArray<AIRequestPreview>(payload.aiRequestPreviews)
+    aiRequestPreviews: cloneArray<AIRequestPreview>(payload.aiRequestPreviews),
+    repairTasks: cloneArray<RepairTask>(payload.repairTasks)
   };
 }
 
@@ -643,7 +689,8 @@ function countImportPayload(payload: ImportPackagePayload): ExportManifest["coun
     sessions: payload.sessions.length,
     checkIns: payload.checkIns.length,
     insights: payload.insights.length,
-    aiRequestPreviews: payload.aiRequestPreviews.length
+    aiRequestPreviews: payload.aiRequestPreviews.length,
+    repairTasks: payload.repairTasks.length
   };
 }
 
@@ -666,6 +713,7 @@ function findImportConflicts(payload: ImportPackagePayload, current: ImportPacka
   addConflicts(conflicts, "conceptEdges", payload.conceptEdges, current.conceptEdges);
   addConflicts(conflicts, "insights", payload.insights, current.insights);
   addConflicts(conflicts, "aiRequestPreviews", payload.aiRequestPreviews, current.aiRequestPreviews);
+  addConflicts(conflicts, "repairTasks", payload.repairTasks, current.repairTasks);
   return conflicts;
 }
 
@@ -717,6 +765,16 @@ function planKeepBoth(pkg: ParsedImportPackage, current: ImportPackagePayload, p
       id: mapRequiredId(previewItem.id),
       sourceId: mapOptionalId(previewItem.sourceId),
       chunkIds: previewItem.chunkIds.map((id) => mapRequiredId(id))
+    })),
+    repairTasks: pkg.payload.repairTasks.map((task) => ({
+      ...task,
+      id: mapRequiredId(task.id),
+      reviewLogId: mapRequiredId(task.reviewLogId),
+      cardId: mapRequiredId(task.cardId),
+      sourceId: mapRequiredId(task.sourceId),
+      sourceChunkId: mapRequiredId(task.sourceChunkId),
+      linkedExplanationId: mapOptionalId(task.linkedExplanationId),
+      linkedRemedialCandidateIds: task.linkedRemedialCandidateIds.map((id) => mapRequiredId(id))
     }))
   };
   return { strategy: "keep_both", preview, idMap, inserts, skipped, repaired: preview.repaired };
@@ -745,6 +803,7 @@ function buildConflictIdMap(payload: ImportPackagePayload, current: ImportPackag
   add("insight", payload.insights, current.insights);
   add("ai_config", payload.aiProviderConfigs, current.aiProviderConfigs);
   add("preview", payload.aiRequestPreviews, current.aiRequestPreviews);
+  add("repair", payload.repairTasks, current.repairTasks);
   return idMap;
 }
 
@@ -754,6 +813,7 @@ function planSkipDuplicates(pkg: ParsedImportPackage, current: ImportPackagePayl
   const skippedChunkIds = new Set<string>();
   const skippedCandidateIds = new Set<string>();
   const skippedCardIds = new Set<string>();
+  const skippedReviewIds = new Set<string>();
   const skippedSessionIds = new Set<string>();
   const skippedNodeIds = new Set<string>();
 
@@ -786,6 +846,7 @@ function planSkipDuplicates(pkg: ParsedImportPackage, current: ImportPackagePayl
   const reviews = pkg.payload.reviews
     .filter((review) => {
       if (!currentIds.reviews.has(review.id) && !skippedCardIds.has(review.cardId) && !skippedSourceIds.has(review.sourceId)) return true;
+      skippedReviewIds.add(review.id);
       skipped.push(problem("skipped_duplicate", "warning", "reviews", review.id, `复习记录 ${review.id} 已存在或依赖被跳过。`));
       return false;
     })
@@ -827,7 +888,17 @@ function planSkipDuplicates(pkg: ParsedImportPackage, current: ImportPackagePayl
       reflections: pkg.payload.reflections.filter((reflection) => !currentIds.reflections.has(reflection.id) && !skippedSessionIds.has(reflection.sessionId)),
       insights: pkg.payload.insights.filter((insight) => !currentIds.insights.has(insight.id)),
       aiProviderConfigs: pkg.payload.aiProviderConfigs.filter((config) => !currentIds.aiProviderConfigs.has(config.id)),
-      aiRequestPreviews: pkg.payload.aiRequestPreviews.filter((previewItem) => !currentIds.aiRequestPreviews.has(previewItem.id) && (!previewItem.sourceId || !skippedSourceIds.has(previewItem.sourceId)))
+      aiRequestPreviews: pkg.payload.aiRequestPreviews.filter((previewItem) => !currentIds.aiRequestPreviews.has(previewItem.id) && (!previewItem.sourceId || !skippedSourceIds.has(previewItem.sourceId))),
+      repairTasks: pkg.payload.repairTasks.filter((task) => {
+        const shouldKeep =
+          !currentIds.repairTasks.has(task.id) &&
+          !skippedReviewIds.has(task.reviewLogId) &&
+          !skippedCardIds.has(task.cardId) &&
+          !skippedSourceIds.has(task.sourceId) &&
+          !skippedChunkIds.has(task.sourceChunkId);
+        if (!shouldKeep) skipped.push(problem("skipped_duplicate", "warning", "repairTasks", task.id, `修复任务 ${task.id} 已存在或依赖被跳过。`));
+        return shouldKeep;
+      })
     },
     skipped,
     repaired: preview.repaired
@@ -850,7 +921,8 @@ function buildCurrentIdSets(current: ImportPackagePayload) {
     reflections: new Set(current.reflections.map((item) => item.id)),
     insights: new Set(current.insights.map((item) => item.id)),
     aiProviderConfigs: new Set(current.aiProviderConfigs.map((item) => item.id)),
-    aiRequestPreviews: new Set(current.aiRequestPreviews.map((item) => item.id))
+    aiRequestPreviews: new Set(current.aiRequestPreviews.map((item) => item.id)),
+    repairTasks: new Set(current.repairTasks.map((item) => item.id))
   };
 }
 

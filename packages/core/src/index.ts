@@ -25,6 +25,25 @@ export type AIRequestPreviewStatus = "pending_confirmation" | "confirmed" | "com
 export type ReviewEvidenceStrength = "strong" | "medium" | "weak";
 export type CheckInFocusState = "focused" | "wandering" | "stuck" | "passive";
 export type ConceptRelationType = "related" | "contrast" | "causal" | "exception";
+export type ReviewStage = "idle" | "confidence" | "answering" | "self_rating" | "feedback";
+export type ReviewEvent =
+  | "start_card"
+  | "choose_confidence"
+  | "edit_answer"
+  | "mark_source_seen"
+  | "self_rate_again"
+  | "self_rate_partial"
+  | "self_rate_correct"
+  | "self_rate_easy"
+  | "next_card"
+  | "cancel";
+export type RepairTaskStatus = "open" | "in_progress" | "resolved" | "dismissed";
+export type RepairTaskResolution =
+  | "explained"
+  | "remedial_card_created"
+  | "card_fixed"
+  | "source_gap_confirmed"
+  | "dismissed_not_actionable";
 
 export interface ActionResult {
   ok: boolean;
@@ -114,6 +133,36 @@ export interface ReviewLog {
   evidenceStrength?: ReviewEvidenceStrength;
   durationMs: number;
   createdAt: string;
+}
+
+export interface ReviewStateMachine {
+  stage: ReviewStage;
+  cardId?: string;
+  confidence?: 1 | 2 | 3 | 4 | 5;
+  answerText: string;
+  sourceVisibleBeforeAnswer: boolean;
+  startedAt?: string;
+  answeredAt?: string;
+  feedbackAt?: string;
+}
+
+export interface RepairTask {
+  id: string;
+  reviewLogId: string;
+  cardId: string;
+  sourceId: string;
+  sourceChunkId: string;
+  status: RepairTaskStatus;
+  reason: MistakeReason;
+  confidence: 4 | 5;
+  outcome: "again" | "partial";
+  tagSnapshot: string[];
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt?: string;
+  resolution?: RepairTaskResolution;
+  linkedExplanationId?: string;
+  linkedRemedialCandidateIds: string[];
 }
 
 export interface LearningSession {
@@ -253,7 +302,7 @@ export interface ConceptEdge {
 }
 
 export interface ExportManifest {
-  schemaVersion: 3;
+  schemaVersion: 3 | 4;
   exportedAt: string;
   counts: {
     materials: number;
@@ -266,6 +315,7 @@ export interface ExportManifest {
     checkIns: number;
     insights: number;
     aiRequestPreviews: number;
+    repairTasks: number;
   };
   includesAIRequestRecords: boolean;
 }
@@ -309,6 +359,7 @@ export interface ImportPackagePayload {
   insights: InsightSnapshot[];
   aiProviderConfigs: AIProviderConfig[];
   aiRequestPreviews: AIRequestPreview[];
+  repairTasks: RepairTask[];
 }
 
 export interface ImportPlan {
@@ -402,7 +453,10 @@ export interface LearningEvent {
     | "data_exported"
     | "data_imported"
     | "data_import_failed"
-    | "data_deleted";
+    | "data_deleted"
+    | "repair_task_created"
+    | "repair_task_updated"
+    | "repair_task_resolved";
   confidence?: 1 | 2 | 3 | 4 | 5;
   outcome?: ReviewOutcome | "completed" | "saved" | "exported";
   durationMs?: number;

@@ -39,6 +39,8 @@ Included:
 
 ## v0.2.0 - Materials and Durable Card Creation
 
+Status: implemented.
+
 Goal: make the material-to-review-card loop reliable without depending on AI.
 
 Planned work:
@@ -60,6 +62,8 @@ Acceptance criteria:
 - material detail pages expose the full evidence chain.
 
 ## v0.3.0 - Review Quality and High-Confidence Error Repair
+
+Status: implemented baseline.
 
 Goal: turn review into a strict calibration evidence system.
 
@@ -102,13 +106,15 @@ Acceptance criteria:
 
 ## v0.5.0 - Data Portability and Provider Boundary
 
+Status: partially implemented for JSON restore.
+
 Goal: make local-first data resilient and make real provider integration safe.
 
 Planned work:
 
 - add JSON import/restore from export packages;
 - validate schema version and show import summary before import;
-- support append and overwrite modes;
+- support safe append modes without overwrite;
 - add data integrity checks for dangling cards, chunks, sources, reviews, explanation links, and concept edges;
 - add optional server-side provider proxy configuration;
 - keep upload preview mandatory for every provider mode;

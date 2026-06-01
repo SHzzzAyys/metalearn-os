@@ -54,8 +54,8 @@ const candidate: CardCandidate = {
 };
 
 describe("exports", () => {
-  it("serializes export packages with schema v3 manifest metadata", () => {
-    const manifest = createExportManifest({ materials: [source], cards: [card], reviews: [{}], aiRequestPreviews: [{}] });
+  it("serializes export packages with schema v4 manifest metadata", () => {
+    const manifest = createExportManifest({ materials: [source], cards: [card], reviews: [{}], aiRequestPreviews: [{}], repairTasks: [{}] });
     const parsed = JSON.parse(serializeExportPackage({ cards: [card] }, manifest)) as {
       version: number;
       schemaVersion: number;
@@ -63,12 +63,13 @@ describe("exports", () => {
       payload: { cards: Card[] };
     };
 
-    expect(parsed.version).toBe(3);
-    expect(parsed.schemaVersion).toBe(3);
-    expect(parsed.manifest.schemaVersion).toBe(3);
+    expect(parsed.version).toBe(4);
+    expect(parsed.schemaVersion).toBe(4);
+    expect(parsed.manifest.schemaVersion).toBe(4);
     expect(parsed.manifest.counts.materials).toBe(1);
     expect(parsed.manifest.counts.cards).toBe(1);
     expect(parsed.manifest.counts.reviews).toBe(1);
+    expect(parsed.manifest.counts.repairTasks).toBe(1);
     expect(parsed.manifest.includesAIRequestRecords).toBe(true);
     expect(parsed.payload.cards[0].id).toBe("card_1");
   });

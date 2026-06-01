@@ -50,8 +50,9 @@ Implemented:
 - source-grounded candidate card generation;
 - candidate review with edit, approve, reject, and bulk approve;
 - review flow with hidden source, confidence 1-5, active answer, self-rating, source reveal, and calibration feedback;
-- review keyboard shortcuts: `1-5` for confidence, `A/P/C/E` for wrong, partial, correct, easy;
-- high-confidence error workflow;
+- strict review state machine that prevents skipping confidence prediction or active answer entry;
+- review keyboard shortcuts: `1-5` for confidence, `A/P/C/E` for wrong, partial, correct, easy, and `N` for next card after feedback;
+- high-confidence error repair tasks at `/review/mistakes`;
 - simplified FSRS adapter interface;
 - Feynman explanation versions, gap tags, rubric trend, concept nodes, and confirmed concept edges;
 - explanation-to-card handoff;
@@ -123,7 +124,7 @@ Core stack:
 
 ## Data Model
 
-IndexedDB uses schema `v3`.
+IndexedDB uses schema `v4`.
 
 Important tables:
 
@@ -133,6 +134,7 @@ Important tables:
 - `cardCandidates`
 - `cards`
 - `reviewLogs`
+- `repairTasks`
 - `learningSessions`
 - `checkIns`
 - `reflections`
@@ -251,6 +253,13 @@ import material -> manual source-grounded card -> export JSON
 -> clear local data -> import JSON with preview -> review restored card
 ```
 
+It also covers the repair loop:
+
+```text
+high-confidence wrong review -> repair task -> Feynman explanation
+-> remedial candidate -> resolved task -> insight count update
+```
+
 ## CI
 
 GitHub Actions runs:
@@ -272,7 +281,7 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for the current beta roadmap.
 Near-term milestones:
 
 - `v0.2.0`: material detail pages, manual card creation, and JSON import/restore;
-- `v0.3.0`: strict review state machine and high-confidence error workspace;
+- `v0.3.0`: strict review state machine and high-confidence error repair tasks;
 - `v0.4.0`: explanation version diffs and stronger insights;
 - `v0.5.0`: safe provider proxy boundary and stronger restore compatibility.
 

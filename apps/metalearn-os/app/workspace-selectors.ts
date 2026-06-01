@@ -11,6 +11,7 @@ import type {
   LearningSession,
   ProductArea,
   Reflection,
+  RepairTask,
   ReviewLog,
   SourceChunk,
   SourceDocument
@@ -46,6 +47,7 @@ export interface WorkspaceState {
   insights: InsightSnapshot[];
   aiConfigs: AIProviderConfig[];
   aiRequestPreviews: AIRequestPreview[];
+  repairTasks: RepairTask[];
 }
 
 export const emptyWorkspaceState: WorkspaceState = {
@@ -63,7 +65,8 @@ export const emptyWorkspaceState: WorkspaceState = {
   conceptEdges: [],
   insights: [],
   aiConfigs: [],
-  aiRequestPreviews: []
+  aiRequestPreviews: [],
+  repairTasks: []
 };
 
 export const sampleText =
@@ -104,6 +107,7 @@ export function deriveWorkspace(input: { state: WorkspaceState; now: Date; nowMs
     now
   });
   const highConfidenceErrors = findHighConfidenceErrors(state.cards, state.logs);
+  const repairTaskSummary = buildRepairTaskSummary(state.repairTasks);
   const assets = buildStudyAssets({
     sources: state.sources,
     chunks: state.chunks,
@@ -126,7 +130,8 @@ export function deriveWorkspace(input: { state: WorkspaceState; now: Date; nowMs
     tagOverconfidence,
     explanationGapTags,
     latestPreview,
-    modules: buildModules(dueCards.length, pendingCandidates.length, highConfidenceErrors.length),
+    repairTaskSummary,
+    modules: buildModules(dueCards.length, pendingCandidates.length, repairTaskSummary.openCount),
     metrics: {
       brierScore: calculateBrierScore(state.logs),
       highConfidenceErrorRate: calculateHighConfidenceErrorRate(state.logs),
@@ -190,6 +195,41 @@ export function resolveSourceForCard(card: Card | undefined, chunks: SourceChunk
   if (!card) return undefined;
   const chunk = chunks.find((item) => item.id === card.sourceChunkId);
   return chunk ? sources.find((source) => source.id === chunk.sourceId) : undefined;
+}
+
+export function buildRepairTaskSummary(tasks: RepairTask[]) {
+  const unresolved = tasks.filter((task) => task.status === "open" || task.status === "in_progress");
+  const byTag = new Map<string, number>();
+  const byReason = new Map<string, number>();
+  const bySource = new Map<string, number>();
+  const now = Date.now();
+  const weekAgo = now - 7 * 86_400_000;
+  let createdThisWeek = 0;
+  let resolvedThisWeek = 0;
+  for (const task of tasks) {
+    if (new Date(task.createdAt).getTime() >= weekAgo) createdThisWeek += 1;
+    if (task.resolvedAt && new Date(task.resolvedAt).getTime() >= weekAgo) resolvedThisWeek += 1;
+  }
+  for (const task of unresolved) {
+    byReason.set(task.reason, (byReason.get(task.reason) ?? 0) + 1);
+    bySource.set(task.sourceId, (bySource.get(task.sourceId) ?? 0) + 1);
+    for (const tag of task.tagSnapshot) {
+      byTag.set(tag, (byTag.get(tag) ?? 0) + 1);
+    }
+  }
+  const top = (map: Map<string, number>) => [...map.entries()].sort((left, right) => right[1] - left[1]).slice(0, 6).map(([label, count]) => ({ label, count }));
+  return {
+    openCount: unresolved.filter((task) => task.status === "open").length,
+    inProgressCount: unresolved.filter((task) => task.status === "in_progress").length,
+    unresolvedCount: unresolved.length,
+    resolvedCount: tasks.filter((task) => task.status === "resolved").length,
+    dismissedCount: tasks.filter((task) => task.status === "dismissed").length,
+    createdThisWeek,
+    resolvedThisWeek,
+    byTag: top(byTag),
+    byReason: top(byReason),
+    bySource: top(bySource)
+  };
 }
 
 export function buildModules(due: number, pending: number, errors: number): ModuleNavItem[] {

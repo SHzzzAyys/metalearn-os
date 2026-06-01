@@ -28,4 +28,4 @@ Review source tracing resolves `Card.sourceChunkId -> SourceChunk.sourceId -> So
 
 ## Storage
 
-IndexedDB is currently on schema `v3`. New migrations should include focused unit tests and should keep export compatibility explicit through the package manifest.
+IndexedDB is currently on schema `v4`. New migrations should include focused unit tests and should keep export compatibility explicit through the package manifest. Schema `v3` JSON imports remain supported by treating missing `repairTasks` as an empty array.

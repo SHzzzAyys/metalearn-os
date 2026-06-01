@@ -38,6 +38,8 @@ High-value unit tests should cover:
 - overconfidence index;
 - high-confidence error rate;
 - review evidence strength;
+- review state machine legal and illegal transitions;
+- high-confidence repair task creation and resolution;
 - review queue ordering;
 - source traceability through chunks;
 - tag overconfidence;
@@ -48,6 +50,7 @@ High-value unit tests should cover:
 - import package parse and schema rejection;
 - import preview warnings, repairable issues, and fatal problems;
 - import conflict planning for `keep_both` and `skip_duplicates`;
+- v3/v4 export and restore compatibility for repair tasks;
 - AI output schemas.
 
 ## Integration Test Priorities
@@ -57,6 +60,7 @@ Important integration paths:
 - import material -> chunk -> preview -> candidates;
 - edit candidate -> approve -> review queue;
 - high-confidence error -> mistake reason -> explanation repair;
+- high-confidence error -> repair task -> source/Feynman/remedial card -> resolved;
 - explanation version -> gap tags -> candidate handoff;
 - session -> check-in -> reflection -> daily plan;
 - export -> clear -> import restore -> review restored card;
@@ -70,7 +74,8 @@ Desktop and mobile should cover:
 - AI request preview;
 - candidate generation and approval;
 - review with confidence prediction;
-- high-confidence error visibility;
+- strict review state machine and keyboard shortcuts;
+- high-confidence error repair task visibility;
 - Feynman questions and explanation save;
 - insight and privacy copy;
 - JSON restore preview and import report;
@@ -84,6 +89,8 @@ Recommended visual targets:
 - home desktop;
 - library mobile;
 - review desktop;
+- review mistakes desktop;
+- review mistakes mobile;
 - explain desktop;
 - insights desktop;
 - settings mobile.

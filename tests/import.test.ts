@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Card, CardCandidate, ReviewLog, SourceChunk, SourceDocument } from "@metalearn/core";
+import type { Card, CardCandidate, RepairTask, ReviewLog, SourceChunk, SourceDocument } from "@metalearn/core";
 import { createInitialFsrsState } from "@metalearn/learning-science";
 import {
   createExportManifest,
@@ -61,6 +61,22 @@ const review: ReviewLog = {
   createdAt: "2026-06-01T00:00:00.000Z"
 };
 
+const repairTask: RepairTask = {
+  id: "repair_1",
+  reviewLogId: "review_1",
+  cardId: "card_1",
+  sourceId: "source_1",
+  sourceChunkId: "chunk_1",
+  status: "open",
+  reason: "not_retrieved",
+  confidence: 4,
+  outcome: "partial",
+  tagSnapshot: ["course", "spacing"],
+  createdAt: "2026-06-01T00:00:00.000Z",
+  updatedAt: "2026-06-01T00:00:00.000Z",
+  linkedRemedialCandidateIds: []
+};
+
 function fullPackage(overrides: Record<string, unknown> = {}) {
   const payload = {
     materials: [source],
@@ -77,6 +93,7 @@ function fullPackage(overrides: Record<string, unknown> = {}) {
     reflections: [],
     insights: [],
     aiRequestPreviews: [],
+    repairTasks: [repairTask],
     ...overrides
   };
   return serializeExportPackage(payload, createExportManifest(payload));
@@ -139,6 +156,19 @@ describe("JSON import packages", () => {
     expect(plan.inserts.reviews[0].sourceId).toBe("source_1");
   });
 
+  it("imports v3 packages with empty repair tasks", () => {
+    const v3 = JSON.stringify({
+      schemaVersion: 3,
+      payload: { materials: [source], chunks: [chunk], candidates: [candidate], cards: [card], reviews: [review] }
+    });
+    const parsed = parseImportPackage(v3);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.package.payload.repairTasks).toEqual([]);
+      expect(createImportPreview(parsed.package).canImport).toBe(true);
+    }
+  });
+
   it("keeps both copies by remapping conflicting ids without mutating the package", () => {
     const parsed = parseImportPackage(fullPackage());
     expect(parsed.ok).toBe(true);
@@ -152,6 +182,8 @@ describe("JSON import packages", () => {
     expect(plan.inserts.chunks[0].sourceId).toBe(plan.inserts.materials[0].id);
     expect(plan.inserts.cards[0].sourceChunkId).toBe(plan.inserts.chunks[0].id);
     expect(plan.inserts.reviews[0].cardId).toBe(plan.inserts.cards[0].id);
+    expect(plan.inserts.repairTasks[0].cardId).toBe(plan.inserts.cards[0].id);
+    expect(plan.inserts.repairTasks[0].reviewLogId).toBe(plan.inserts.reviews[0].id);
     expect(JSON.stringify(parsed.package.payload)).toBe(before);
   });
 
@@ -165,6 +197,13 @@ describe("JSON import packages", () => {
     expect(plan.inserts.materials).toHaveLength(0);
     expect(plan.inserts.chunks).toHaveLength(0);
     expect(plan.inserts.cards).toHaveLength(0);
+    expect(plan.inserts.repairTasks).toHaveLength(0);
     expect(plan.skipped.length).toBeGreaterThan(0);
+  });
+
+  it("blocks repair tasks with missing core references", () => {
+    const parsed = parseImportPackage(fullPackage({ repairTasks: [{ ...repairTask, reviewLogId: "missing_review" }] }));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(createImportPreview(parsed.package).fatalProblems.some((item) => item.code === "missing_repair_review")).toBe(true);
   });
 });

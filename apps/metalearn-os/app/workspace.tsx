@@ -4,6 +4,7 @@ import type { ChangeEvent } from "react";
 import { useEffect, useState } from "react";
 import {
   Archive,
+  AlertTriangle,
   Brain,
   Check,
   ClipboardCheck,
@@ -14,6 +15,7 @@ import {
   HelpCircle,
   Link2,
   Lock,
+  RefreshCw,
   Save,
   Send,
   Sparkles,
@@ -35,6 +37,7 @@ import type {
   LearningTemplateId,
   MistakeReason,
   ProductArea,
+  RepairTask,
   ReviewOutcome,
   SourceChunk,
   SourceDocument,
@@ -70,9 +73,12 @@ import { deriveMaterialDetail, viewMeta } from "./workspace-selectors";
 
 type Workspace = ReturnType<typeof useMetaLearnWorkspace>;
 
-export function MetaLearnOSPage({ view, sourceId }: { view: ProductArea; sourceId?: string }) {
+export function MetaLearnOSPage({ view, sourceId, reviewMode = "main" }: { view: ProductArea; sourceId?: string; reviewMode?: "main" | "mistakes" }) {
   const workspace = useMetaLearnWorkspace();
-  const meta = viewMeta[view];
+  const meta =
+    view === "review" && reviewMode === "mistakes"
+      ? { path: "/review/mistakes", title: "高信心错误", subtitle: "把最危险的熟悉感错误变成可追踪、可修复、可关闭的任务。" }
+      : viewMeta[view];
   const { derived, state } = workspace;
 
   useEffect(() => {
@@ -84,10 +90,17 @@ export function MetaLearnOSPage({ view, sourceId }: { view: ProductArea; sourceI
       }
       const outcomeMap: Record<string, ReviewOutcome> = { a: "again", p: "partial", c: "correct", e: "easy" };
       const outcome = outcomeMap[event.key.toLowerCase()];
-      if (outcome && workspace.reviewStage === "answer") void workspace.completeReview(outcome);
+      if (outcome && workspace.reviewStage === "self_rating") void workspace.completeReview(outcome);
+      if (event.key.toLowerCase() === "n" && workspace.reviewStage === "feedback") workspace.startNextReview();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+  }, [view, workspace]);
+
+  useEffect(() => {
+    if (view !== "explain") return;
+    const taskId = new URLSearchParams(window.location.search).get("repairTaskId");
+    if (taskId && taskId !== workspace.activeRepairTaskId) void workspace.startRepairExplanation(taskId);
   }, [view, workspace]);
 
   const actions = (
@@ -132,7 +145,8 @@ export function MetaLearnOSPage({ view, sourceId }: { view: ProductArea; sourceI
         {workspace.aiPreview ? <AIRequestPreviewPanel preview={workspace.aiPreview} onConfirm={workspace.confirmCandidateGeneration} onCancel={workspace.cancelAIRequestPreview} /> : null}
         {view === "home" ? <HomeView workspace={workspace} /> : null}
         {view === "library" ? sourceId ? <MaterialDetailView workspace={workspace} sourceId={sourceId} /> : <LibraryView workspace={workspace} /> : null}
-        {view === "review" ? <ReviewView workspace={workspace} /> : null}
+        {view === "review" && reviewMode === "main" ? <ReviewView workspace={workspace} /> : null}
+        {view === "review" && reviewMode === "mistakes" ? <MistakesView workspace={workspace} /> : null}
         {view === "explain" ? <ExplainView workspace={workspace} /> : null}
         {view === "compass" ? <CompassView workspace={workspace} /> : null}
         {view === "insights" ? <InsightsView workspace={workspace} /> : null}
@@ -551,22 +565,40 @@ function MaterialDetailView({ workspace, sourceId }: { workspace: Workspace; sou
 
 function ReviewView({ workspace }: { workspace: Workspace }) {
   const { derived } = workspace;
+  const canAnswer = workspace.reviewStage === "answering" || workspace.reviewStage === "self_rating";
+  const canSelfRate = workspace.reviewStage === "self_rating";
+  const sourceVisible = workspace.reviewStage === "feedback" || workspace.sourceVisibleBeforeAnswer;
+  const activeCard = workspace.activeReviewCard ?? derived.activeCard;
   return (
     <section className="grid gap-5 xl:grid-cols-[1fr_380px]">
-      {derived.activeCard ? (
+      {activeCard ? (
         <ReviewCard
-          title={derived.activeCard.question}
-          sourceQuote={workspace.revealedSourceQuote || derived.activeCard.sourceQuote}
-          sourceVisible={workspace.reviewStage === "feedback"}
-          meta={`${derived.activeCard.cardType} · ${derived.activeCard.tags.join(" / ")}`}
+          title={activeCard.question}
+          sourceQuote={workspace.revealedSourceQuote || activeCard.sourceQuote}
+          sourceVisible={sourceVisible}
+          meta={`${activeCard.cardType} · ${activeCard.tags.join(" / ")}`}
         >
           <div className="grid gap-4">
+            <div className="grid grid-cols-4 gap-2 text-xs font-semibold text-zinc-600">
+              <ReviewStep label="1 信心" active={workspace.reviewStage === "confidence"} done={workspace.reviewStage !== "confidence" && workspace.reviewStage !== "idle"} />
+              <ReviewStep label="2 回答" active={workspace.reviewStage === "answering"} done={workspace.reviewStage === "self_rating" || workspace.reviewStage === "feedback"} />
+              <ReviewStep label="3 自评" active={workspace.reviewStage === "self_rating"} done={workspace.reviewStage === "feedback"} />
+              <ReviewStep label="4 反馈" active={workspace.reviewStage === "feedback"} done={false} />
+            </div>
             <Field label="先评信心">
               <ConfidenceSelector value={workspace.confidence} onChange={workspace.chooseConfidence} />
             </Field>
             <Field label="主动回答">
-              <TextArea value={workspace.answerText} onChange={(event) => workspace.setAnswerText(event.target.value)} placeholder="先回想，再看来源。不要直接复制。" />
+              <TextArea disabled={!canAnswer} value={workspace.answerText} onChange={(event) => workspace.setAnswerText(event.target.value)} placeholder="先回想，再看来源。不要直接复制。" />
             </Field>
+            {workspace.reviewStage !== "feedback" && !workspace.sourceVisibleBeforeAnswer ? (
+              <SecondaryButton onClick={workspace.markSourceSeenBeforeAnswer}>
+                <EyeOff size={16} /> 我需要先看来源
+              </SecondaryButton>
+            ) : null}
+            {workspace.sourceVisibleBeforeAnswer && workspace.reviewStage !== "feedback" ? (
+              <InlineError message="本轮已经提前查看来源，完成后会记录为弱提取证据。" />
+            ) : null}
             <div className="grid gap-3 md:grid-cols-2">
               <Field label="努力程度">
                 <ConfidenceSelector value={workspace.effort} onChange={workspace.setEffort} />
@@ -575,18 +607,14 @@ function ReviewView({ workspace }: { workspace: Workspace }) {
                 <MistakeReasonSelect value={workspace.mistakeReason} onChange={workspace.setMistakeReason} />
               </Field>
             </div>
-            <label className="flex items-center gap-2 rounded-2xl bg-zinc-50 p-3 text-sm text-zinc-700">
-              <input type="checkbox" checked={workspace.sourceVisibleBeforeAnswer} onChange={(event) => workspace.setSourceVisibleBeforeAnswer(event.target.checked)} />
-              回答前已经看过来源。系统会把这次标记为较弱提取证据。
-            </label>
             <div className="grid gap-2 md:grid-cols-4">
-              <SecondaryButton disabled={workspace.reviewStage === "confidence"} onClick={() => void workspace.completeReview("again")}>错 A</SecondaryButton>
-              <SecondaryButton disabled={workspace.reviewStage === "confidence"} onClick={() => void workspace.completeReview("partial")}>部分对 P</SecondaryButton>
-              <Button disabled={workspace.reviewStage === "confidence"} onClick={() => void workspace.completeReview("correct")}>对 C</Button>
-              <Button disabled={workspace.reviewStage === "confidence"} onClick={() => void workspace.completeReview("easy")}>轻松 E</Button>
+              <SecondaryButton disabled={!canSelfRate} onClick={() => void workspace.completeReview("again")}>错 A</SecondaryButton>
+              <SecondaryButton disabled={!canSelfRate} onClick={() => void workspace.completeReview("partial")}>部分对 P</SecondaryButton>
+              <Button disabled={!canSelfRate} onClick={() => void workspace.completeReview("correct")}>对 C</Button>
+              <Button disabled={!canSelfRate} onClick={() => void workspace.completeReview("easy")}>轻松 E</Button>
             </div>
             <div className="rounded-2xl bg-emerald-50 p-4 text-sm font-medium text-emerald-950">{workspace.reviewFeedback}</div>
-            {workspace.reviewStage === "feedback" ? <SecondaryButton onClick={workspace.startNextReview}>进入下一张</SecondaryButton> : null}
+            {workspace.reviewStage === "feedback" ? <SecondaryButton onClick={workspace.startNextReview}>进入下一张 N</SecondaryButton> : null}
           </div>
         </ReviewCard>
       ) : (
@@ -598,20 +626,145 @@ function ReviewView({ workspace }: { workspace: Workspace }) {
           {derived.reviewQueue.slice(0, 6).map((item) => (
             <DocumentCard key={item.card.id} title={item.card.question} detail={`${item.source?.title ?? "来源缺失，需要修复"} · ${item.reason}`} meta={item.card.dueAt.slice(0, 10)} status={item.urgency} href={item.source ? `/library/${item.source.id}` : "/review"} />
           ))}
-          <p className="mt-2 text-sm font-semibold text-zinc-950">高信心错误工作流</p>
-          {derived.highConfidenceErrors.length === 0 ? <p className="text-sm text-zinc-500">暂无高信心错误。</p> : null}
-          {derived.highConfidenceErrors.slice(0, 4).map(({ log, card }) => (
-            <div key={log.id} className="rounded-2xl bg-rose-50 p-3 text-sm text-rose-950">
-              <p className="font-semibold">{card?.question}</p>
-              <p className="mt-1">信心 {log.confidence}，结果 {log.outcome}，错因 {log.mistakeReason ?? "未标记"}，证据 {log.evidenceStrength ?? "unknown"}</p>
-              <Button className="mt-3" onClick={() => { workspace.setConcept(card?.tags[0] ?? "高信心错误"); window.location.href = "/explain"; }}>
-                <HelpCircle size={16} /> 用费曼复盘
-              </Button>
-            </div>
-          ))}
+          <div className="rounded-2xl bg-rose-50 p-4 text-sm leading-6 text-rose-950">
+            <p className="font-semibold">高信心错误修复</p>
+            <p className="mt-1">未解决 {derived.repairTaskSummary.unresolvedCount} 个，进行中 {derived.repairTaskSummary.inProgressCount} 个。</p>
+            <TextLink href="/review/mistakes">进入修复任务</TextLink>
+          </div>
         </div>
       </Panel>
     </section>
+  );
+}
+
+function ReviewStep({ label, active, done }: { label: string; active: boolean; done: boolean }) {
+  return (
+    <div className={active ? "rounded-xl bg-emerald-950 px-3 py-2 text-white" : done ? "rounded-xl bg-emerald-50 px-3 py-2 text-emerald-800" : "rounded-xl bg-zinc-50 px-3 py-2 text-zinc-500"}>
+      {label}
+    </div>
+  );
+}
+
+function MistakesView({ workspace }: { workspace: Workspace }) {
+  const [statusFilter, setStatusFilter] = useState<RepairTask["status"] | "all">("all");
+  const [reasonFilter, setReasonFilter] = useState<MistakeReason | "all">("all");
+  const { state, derived } = workspace;
+  const cardById = new Map(state.cards.map((card) => [card.id, card]));
+  const sourceById = new Map(state.sources.map((source) => [source.id, source]));
+  const logById = new Map(state.logs.map((log) => [log.id, log]));
+  const tasks = state.repairTasks
+    .filter((task) => statusFilter === "all" || task.status === statusFilter)
+    .filter((task) => reasonFilter === "all" || task.reason === reasonFilter)
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+
+  return (
+    <section className="grid gap-5 xl:grid-cols-[1fr_360px]">
+      <div className="grid gap-5">
+        <StatStrip
+          items={[
+            { label: "未解决", value: String(derived.repairTaskSummary.unresolvedCount), detail: "open + in progress", tone: derived.repairTaskSummary.unresolvedCount ? "danger" : "good" },
+            { label: "进行中", value: String(derived.repairTaskSummary.inProgressCount), detail: "已进入修复", tone: "warn" },
+            { label: "本周新增", value: String(derived.repairTaskSummary.createdThisWeek), detail: "高信心错误任务" },
+            { label: "本周关闭", value: String(derived.repairTaskSummary.resolvedThisWeek), detail: "已解决或忽略", tone: "good" }
+          ]}
+        />
+        <Panel>
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h3 className="text-2xl font-semibold tracking-[-0.02em]">修复任务</h3>
+              <p className="mt-1 text-sm leading-6 text-zinc-600">这些任务来自信心 4-5 但结果为错或部分对的复习记录。</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <select className="rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 text-sm" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as RepairTask["status"] | "all")}>
+                <option value="open">open</option>
+                <option value="in_progress">in progress</option>
+                <option value="resolved">resolved</option>
+                <option value="dismissed">dismissed</option>
+                <option value="all">all</option>
+              </select>
+              <select className="rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 text-sm" value={reasonFilter} onChange={(event) => setReasonFilter(event.target.value as MistakeReason | "all")}>
+                <option value="all">全部错因</option>
+                <option value="unknown">unknown</option>
+                <option value="not_retrieved">not retrieved</option>
+                <option value="confused_concepts">confused concepts</option>
+                <option value="weak_mechanism">weak mechanism</option>
+                <option value="missed_boundary">missed boundary</option>
+                <option value="bad_card">bad card</option>
+                <option value="source_gap">source gap</option>
+              </select>
+            </div>
+          </div>
+          <div className="mt-5 grid gap-3">
+            {tasks.length === 0 ? <EmptyState title="没有匹配的修复任务" detail="完成一次高信心答错或部分对的复习后，这里会出现可追踪任务。" /> : null}
+            {tasks.map((task) => {
+              const card = cardById.get(task.cardId);
+              const source = sourceById.get(task.sourceId);
+              const log = logById.get(task.reviewLogId);
+              return (
+                <article key={task.id} className="rounded-[1.25rem] border border-white/70 bg-white/78 p-4 shadow-sm">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap gap-2">
+                        <Badge className={task.status === "open" ? "border-rose-200 bg-rose-50 text-rose-800" : undefined}>{task.status}</Badge>
+                        <Badge>信心 {task.confidence}</Badge>
+                        <Badge>{task.reason}</Badge>
+                      </div>
+                      <h4 className="mt-3 break-words text-lg font-semibold tracking-[-0.01em] text-zinc-950">{card?.question ?? "卡片缺失"}</h4>
+                      <p className="mt-1 text-sm text-zinc-600">{source?.title ?? "来源缺失，需要修复"} · {task.createdAt.slice(0, 10)}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <TextLink href={`/library/${task.sourceId}`}>查看来源</TextLink>
+                      <TextLink href={`/explain?repairTaskId=${task.id}`}>用费曼复盘</TextLink>
+                    </div>
+                  </div>
+                  <EvidenceCard quote={card?.sourceQuote ?? "来源片段缺失。"} className="mt-4" />
+                  <p className="mt-3 text-sm leading-6 text-zinc-600">结果 {task.outcome}，证据 {log?.evidenceStrength ?? "unknown"}。修复动作完成不等于已经掌握，只表示你处理过这个盲区。</p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <SecondaryButton onClick={() => void workspace.createRemedialCandidateForTask(task.id)}>
+                      <RefreshCw size={16} /> 生成补救卡
+                    </SecondaryButton>
+                    <Button onClick={() => void workspace.updateRepairTask(task.id, "resolved", "explained")}>
+                      <Check size={16} /> 标记已解决
+                    </Button>
+                    <SecondaryButton onClick={() => void workspace.updateRepairTask(task.id, "dismissed", "dismissed_not_actionable")}>
+                      <X size={16} /> 忽略
+                    </SecondaryButton>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </Panel>
+      </div>
+      <aside className="grid gap-5 content-start">
+        <Panel>
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={18} className="text-rose-600" />
+            <h3 className="text-xl font-semibold tracking-[-0.02em]">错因分布</h3>
+          </div>
+          <div className="mt-4 grid gap-2">
+            {derived.repairTaskSummary.byReason.length === 0 ? <p className="text-sm text-zinc-500">证据不足。</p> : null}
+            {derived.repairTaskSummary.byReason.map((item) => <RepairSummaryLine key={item.label} label={item.label} count={item.count} />)}
+          </div>
+        </Panel>
+        <Panel>
+          <h3 className="text-xl font-semibold tracking-[-0.02em]">薄弱 tag</h3>
+          <div className="mt-4 grid gap-2">
+            {derived.repairTaskSummary.byTag.length === 0 ? <p className="text-sm text-zinc-500">证据不足。</p> : null}
+            {derived.repairTaskSummary.byTag.map((item) => <RepairSummaryLine key={item.label} label={item.label} count={item.count} />)}
+          </div>
+        </Panel>
+      </aside>
+    </section>
+  );
+}
+
+function RepairSummaryLine({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
+      <span className="break-words">{label}</span>
+      <span className="font-mono font-semibold tabular-nums">{count}</span>
+    </div>
   );
 }
 
@@ -625,6 +778,11 @@ function ExplainView({ workspace }: { workspace: Workspace }) {
     <section className="grid gap-5 xl:grid-cols-[1fr_410px]">
       <Panel>
         <h3 className="text-2xl font-semibold tracking-[-0.02em]">解释工作台</h3>
+        {workspace.activeRepairTaskId ? (
+          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-950">
+            当前正在处理高信心错误修复任务。保存解释或生成候选卡会写回任务记录。
+          </div>
+        ) : null}
         <div className="mt-5 grid gap-4 md:grid-cols-[1fr_220px]">
           <Field label="概念">
             <TextInput value={workspace.concept} onChange={(event) => workspace.setConcept(event.target.value)} />
@@ -801,6 +959,11 @@ function InsightsView({ workspace }: { workspace: Workspace }) {
           <ProgressRing value={1 - derived.insight.highConfidenceErrorRate} label={`高信心错误 ${Math.round(derived.insight.highConfidenceErrorRate * 100)}%`} />
           <ProgressRing value={1 - derived.insight.passiveLearningRisk} label={`被动学习风险 ${Math.round(derived.insight.passiveLearningRisk * 100)}%`} />
         </div>
+        <div className="mt-6 rounded-2xl border border-rose-100 bg-rose-50/70 p-4 text-sm leading-6 text-rose-950">
+          <p className="font-semibold">未解决高信心错误任务：{derived.repairTaskSummary.unresolvedCount}</p>
+          <p className="mt-1">任务关闭只表示修复动作完成，不表示系统判定你已经掌握。</p>
+          {derived.repairTaskSummary.unresolvedCount > 0 ? <TextLink href="/review/mistakes">查看修复任务</TextLink> : <span className="text-rose-800">当前没有待修复任务。</span>}
+        </div>
         <div className="mt-6 grid gap-3">
           {buckets.map((bucket) => (
             <div key={bucket.confidence}>
@@ -834,6 +997,9 @@ function InsightsView({ workspace }: { workspace: Workspace }) {
             {derived.explanationGapTags.length === 0 ? <span className="text-sm text-zinc-500">证据不足</span> : null}
             {derived.explanationGapTags.map((tag) => <Badge key={tag}>{rubricLabel(tag)}</Badge>)}
           </div>
+          <p className="text-sm font-semibold text-zinc-950">高信心错误错因</p>
+          {derived.repairTaskSummary.byReason.length === 0 ? <span className="text-sm text-zinc-500">证据不足</span> : null}
+          {derived.repairTaskSummary.byReason.map((item) => <div key={item.label} className="rounded-2xl bg-white/70 p-3 text-sm text-zinc-700">{item.label}: {item.count} 个未解决</div>)}
         </div>
       </Panel>
     </section>
