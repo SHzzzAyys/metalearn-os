@@ -1,0 +1,27 @@
+name: Learning-science discussion
+description: Discuss retrieval practice, calibration, explanation, or metric design.
+title: "[Learning science]: "
+labels: ["area:learning-science", "type:discussion"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question or claim
+      description: What learning-science behavior should the product consider?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence or rationale
+      description: Link papers or explain the reasoning. Avoid unsupported claims.
+  - type: textarea
+    id: product-impact
+    attributes:
+      label: Product impact
+      description: Which workflow or metric would change?
+  - type: textarea
+    id: risk
+    attributes:
+      label: Risks
+      description: How could this add friction, overclaim effects, or reduce privacy?

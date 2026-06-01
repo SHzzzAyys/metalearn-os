@@ -1,0 +1,37 @@
+name: Privacy or data concern
+description: Report a privacy, export, deletion, or data-control concern.
+title: "[Privacy]: "
+labels: ["area:privacy", "type:bug"]
+body:
+  - type: textarea
+    id: concern
+    attributes:
+      label: Concern
+      description: What data or privacy boundary may be affected?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction or evidence
+      description: Use non-private sample data only.
+  - type: dropdown
+    id: boundary
+    attributes:
+      label: Boundary
+      options:
+        - AI upload preview
+        - Local deletion
+        - Export package
+        - IndexedDB storage
+        - Provider configuration
+        - Public documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected privacy behavior
+    validations:
+      required: true

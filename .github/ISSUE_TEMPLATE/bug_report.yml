@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a reproducible defect in MetaLearn OS.
+title: "[Bug]: "
+labels: ["type:bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is broken?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include route, browser, and sample non-private data if useful.
+      placeholder: |
+        1. Go to ...
+        2. Click ...
+        3. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Library
+        - Review
+        - Feynman explanation
+        - Compass
+        - Insights
+        - Settings/privacy
+        - AI boundary
+        - Storage/export
+        - Tests/build
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Local checks
+      description: Commands run, logs, or screenshots.

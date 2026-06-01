@@ -109,6 +109,18 @@ Core stack:
 - Playwright
 - GitHub Actions CI
 
+## Project Documentation
+
+- [Roadmap](docs/ROADMAP.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Data model](docs/DATA_MODEL.md)
+- [Privacy model](docs/PRIVACY.md)
+- [AI boundary](docs/AI_BOUNDARY.md)
+- [Testing](docs/TESTING.md)
+- [Implementation notes](docs/implementation-notes.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+
 ## Data Model
 
 IndexedDB uses schema `v3`.
@@ -218,6 +230,12 @@ Run E2E tests:
 npm run test:e2e
 ```
 
+Run dependency audit:
+
+```bash
+npm audit --audit-level=moderate
+```
+
 The Playwright suite covers the unified loop on desktop and mobile:
 
 ```text
@@ -242,24 +260,14 @@ E2E tests are currently local-first because they require browser runtime setup a
 
 ## Roadmap
 
-Near-term:
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the current beta roadmap.
 
-- improve material detail views;
-- add richer candidate filtering by source and tag;
-- improve reliability curves and tag-level calibration charts;
-- add better explanation diff views;
-- add import/export compatibility tests;
-- add manual card creation when AI generation fails;
-- add optional server-side provider proxy while preserving upload preview.
+Near-term milestones:
 
-Later:
-
-- encrypted sync;
-- real FSRS package adapter;
-- richer concept graph interactions;
-- better accessibility audits;
-- installable PWA polish;
-- optional hosted deployment docs.
+- `v0.2.0`: material detail pages and manual card creation;
+- `v0.3.0`: strict review state machine and high-confidence error workspace;
+- `v0.4.0`: explanation version diffs and stronger insights;
+- `v0.5.0`: JSON import/restore and safe provider proxy boundary.
 
 ## Development Principles
 
