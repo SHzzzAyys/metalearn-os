@@ -235,11 +235,19 @@ function HomeView({ workspace }: { workspace: Workspace }) {
 
 function LibraryView({ workspace }: { workspace: Workspace }) {
   const { derived, state } = workspace;
+  async function handleMaterialFile(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+    await workspace.prepareMaterialFileImport(file);
+    input.value = "";
+  }
+
   return (
     <section className="grid gap-5 xl:grid-cols-[1fr_430px]">
       <Panel>
         <h3 className="text-2xl font-semibold tracking-[-0.02em]">导入材料</h3>
-        <p className="mt-1 text-sm text-zinc-600">支持纯文本、Markdown 和 PDF 文本层粘贴。只有确认 AI 预览后，片段才会进入生成边界。</p>
+        <p className="mt-1 text-sm text-zinc-600">支持粘贴文本，也支持选择 PDF、TXT、Markdown 文件。文件只在本地浏览器读取，不上传；扫描件 PDF 暂不做 OCR。</p>
         <div className="mt-5 grid gap-4 md:grid-cols-[1fr_180px_180px]">
           <Field label="材料标题">
             <TextInput value={workspace.title} onChange={(event) => workspace.setTitle(event.target.value)} />
@@ -252,13 +260,38 @@ function LibraryView({ workspace }: { workspace: Workspace }) {
           </Field>
         </div>
         <div className="mt-4">
-          <Field label="文本 / Markdown / PDF 提取文本" hint="MVP 不做 OCR；PDF 先粘贴文本层。">
+          <div className="grid gap-2">
+            <p className="text-sm font-medium text-zinc-900">学习材料文件</p>
+            <input
+              id="material-file-input"
+              className="sr-only"
+              type="file"
+              accept=".pdf,.txt,.md,.markdown,application/pdf,text/plain,text/markdown"
+              aria-label="学习材料文件"
+              disabled={workspace.isReadingMaterialFile}
+              onChange={(event) => void handleMaterialFile(event)}
+            />
+            <label
+              htmlFor="material-file-input"
+              className="inline-flex min-h-11 w-fit cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white/90 px-4 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50 focus-within:ring-2 focus-within:ring-emerald-500"
+            >
+              <Upload size={16} /> {workspace.isReadingMaterialFile ? "读取文件中" : "选择 PDF / TXT / Markdown"}
+            </label>
+            <span className="text-xs text-zinc-500">选择后会先把文本放到下方文本框。此时还没有入库，必须保存后才能生成候选题。</span>
+          </div>
+          {workspace.materialFileSummary ? <p className="mt-2 text-sm font-medium text-emerald-800">{workspace.materialFileSummary}</p> : null}
+        </div>
+        <div className="mt-4">
+          <Field label="文本 / Markdown / PDF 提取文本" hint={workspace.isReadingMaterialFile ? "正在本地读取文件文本..." : "也可以直接粘贴文本。PDF 必须有可复制文本层。"}>
             <TextArea value={workspace.sourceText} onChange={(event) => workspace.setSourceText(event.target.value)} className="min-h-56" />
           </Field>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
-          <Button onClick={() => void workspace.importSource()}>
-            <Upload size={16} /> 保存到资料库
+          <Button disabled={workspace.isReadingMaterialFile} onClick={() => void workspace.importSource()}>
+            <Upload size={16} /> {workspace.isReadingMaterialFile ? "读取文件中" : "保存到资料库"}
+          </Button>
+          <Button disabled={workspace.isReadingMaterialFile} onClick={() => void workspace.importSourceAndPrepareCandidates()}>
+            <Sparkles size={16} /> 保存并生成候选题
           </Button>
           <SecondaryButton onClick={() => void workspace.prepareCandidateGeneration(state.sources[0])}>
             <Sparkles size={16} /> 为最近材料生成候选题
@@ -311,10 +344,11 @@ function LibraryView({ workspace }: { workspace: Workspace }) {
 
 function ImportRestorePanel({ workspace }: { workspace: Workspace }) {
   async function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.currentTarget.files?.[0];
+    const input = event.currentTarget;
+    const file = input.files?.[0];
     if (!file) return;
     await workspace.prepareJsonImport(await file.text());
-    event.currentTarget.value = "";
+    input.value = "";
   }
 
   return (
@@ -327,14 +361,24 @@ function ImportRestorePanel({ workspace }: { workspace: Workspace }) {
         <Badge>本地解析</Badge>
       </div>
       <div className="mt-5 grid gap-4">
-        <Field label="选择 JSON 导出包" hint="支持全量备份包和单材料包。不支持无来源 flashcard 导入。">
+        <div className="grid gap-2">
+          <p className="text-sm font-medium text-zinc-900">JSON 导出包</p>
           <input
-            className="block w-full rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 text-sm text-zinc-950 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-950 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            id="json-import-file"
+            className="sr-only"
             type="file"
             accept="application/json,.json"
+            aria-label="选择 JSON 导出包"
             onChange={(event) => void handleImportFile(event)}
           />
-        </Field>
+          <label
+            htmlFor="json-import-file"
+            className="inline-flex min-h-11 w-fit cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white/90 px-4 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50 focus-within:ring-2 focus-within:ring-emerald-500"
+          >
+            <Upload size={16} /> 选择 JSON 备份包
+          </label>
+          <span className="text-xs text-zinc-500">支持全量备份包和单材料包。不支持无来源 flashcard 导入。</span>
+        </div>
         {workspace.importPreview ? <ImportPreviewBlock workspace={workspace} preview={workspace.importPreview} /> : null}
         {workspace.importReport ? (
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-950">

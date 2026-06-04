@@ -9,6 +9,7 @@ MetaLearn OS is designed as a local-first learning tool. Learning materials, sel
 - No cloud sync is implemented.
 - No payment or analytics provider is integrated.
 - Export is user-triggered.
+- Material file import is user-triggered and reads supported PDF, TXT, and Markdown files locally in the browser; scanned-PDF OCR is not implemented.
 - JSON import/restore is user-triggered and parsed locally in the browser.
 - Local deletion clears the IndexedDB tables.
 - AI generation uses a local mock provider by default.

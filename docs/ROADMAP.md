@@ -24,7 +24,7 @@ Included:
 
 - unified `apps/metalearn-os` product shell;
 - local IndexedDB schema v3;
-- text, Markdown, and pasted PDF text-layer import;
+- text and Markdown paste or file import, plus selectable text-layer PDF file extraction;
 - chunking and source-grounded candidate card generation;
 - AI request preview before generation;
 - deterministic local mock AI provider;

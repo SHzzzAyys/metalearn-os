@@ -57,11 +57,13 @@ import {
   serializeExportPackage,
   validateCardCandidateEvidence
 } from "@metalearn/storage";
+import { extractPdfTextFromFile } from "./pdf-import";
 import { deriveWorkspace, emptyWorkspaceState, sampleText, type WorkspaceState } from "./workspace-selectors";
 
 interface PendingCardRequest {
   previewId: string;
   source: SourceDocument;
+  chunks: SourceChunk[];
   requestedCount: number;
 }
 
@@ -86,6 +88,12 @@ interface ImportReport {
   skippedCount: number;
   repairedCount: number;
   firstMaterialId?: string;
+}
+
+interface SavedSourceRecord {
+  source: SourceDocument;
+  sourceChunks: SourceChunk[];
+  eventId: string;
 }
 
 const emptyManualCardForm: ManualCardForm = {
@@ -114,6 +122,8 @@ export function useMetaLearnWorkspace() {
   const [templateId, setTemplateId] = useState<LearningTemplateId>("course");
   const [sourceInputType, setSourceInputType] = useState<SourceInputType>("plain_text");
   const [sourceText, setSourceText] = useState(sampleText);
+  const [isReadingMaterialFile, setIsReadingMaterialFile] = useState(false);
+  const [materialFileSummary, setMaterialFileSummary] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [confidence, setConfidence] = useState<1 | 2 | 3 | 4 | 5>(3);
   const [effort, setEffort] = useState<1 | 2 | 3 | 4 | 5>(3);
@@ -221,7 +231,45 @@ export function useMetaLearnWorkspace() {
     return action;
   }
 
-  async function importSource(): Promise<ActionResult> {
+  async function prepareMaterialFileImport(file: File): Promise<ActionResult> {
+    const lowerName = file.name.toLowerCase();
+    const isPdf = file.type === "application/pdf" || lowerName.endsWith(".pdf");
+    const isMarkdown = lowerName.endsWith(".md") || lowerName.endsWith(".markdown") || file.type === "text/markdown";
+    const isText = isMarkdown || lowerName.endsWith(".txt") || file.type.startsWith("text/");
+    if (!isPdf && !isText) return setAction(result(false, "当前材料文件只支持 PDF、TXT、MD 和 Markdown。JSON 备份包请使用右侧“导入与恢复”。"));
+    if (file.size > 25 * 1024 * 1024) return setAction(result(false, "材料文件超过 25 MB。请先拆分材料，或粘贴其中一段可学习文本。"));
+    setIsReadingMaterialFile(true);
+    setMaterialFileSummary("");
+    try {
+      const fileTitle = file.name.replace(/\.(pdf|txt|markdown|md)$/i, "").trim();
+      if (fileTitle && (!title.trim() || title === "我的学习材料")) setTitle(fileTitle);
+
+      if (isPdf) {
+        const extraction = await extractPdfTextFromFile(file);
+        setSourceInputType("pdf_text");
+        setSourceText(extraction.text);
+        const summary = `已从 PDF 提取 ${extraction.pageCount} 页、${extraction.text.length} 个字符。当前只是读取到编辑框，还没有入库。请检查文本后保存，或直接保存并生成候选题。`;
+        setMaterialFileSummary(summary);
+        return setAction(result(true, summary));
+      }
+
+      const text = (await file.text()).trim();
+      if (text.length < 40) return setAction(result(false, "材料至少需要 40 个字符。请换一个文件，或粘贴更完整的学习内容。"));
+      setSourceInputType(isMarkdown ? "markdown" : "plain_text");
+      setSourceText(text);
+      const summary = `已读取 ${isMarkdown ? "Markdown" : "文本"} 文件，${text.length} 个字符。当前只是读取到编辑框，还没有入库。请检查文本后保存，或直接保存并生成候选题。`;
+      setMaterialFileSummary(summary);
+      return setAction(result(true, summary));
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "文件读取失败。请确认文件格式受支持。";
+      setMaterialFileSummary("");
+      return setAction(result(false, message));
+    } finally {
+      setIsReadingMaterialFile(false);
+    }
+  }
+
+  async function saveSourceFromCurrentInput(): Promise<SavedSourceRecord | ActionResult> {
     if (sourceText.trim().length < 40) return setAction(result(false, "材料至少需要 40 个字符，才能生成可用的来源片段。"));
     const timestamp = new Date().toISOString();
     const sourceId = createId("source");
@@ -252,13 +300,23 @@ export function useMetaLearnWorkspace() {
     const eventId = createId("event");
     await saveLearningEvent({ id: eventId, sourceId, appId: "metalearn-os", actionType: "source_imported", outcome: "saved", createdAt: timestamp });
     await loadData();
-    return setAction(result(true, `已导入并分成 ${sourceChunks.length} 个来源片段。`, { eventId }));
+    return { source, sourceChunks, eventId };
+  }
+
+  async function importSource(): Promise<ActionResult> {
+    const saved = await saveSourceFromCurrentInput();
+    if ("ok" in saved) return saved;
+    return setAction(result(true, `已导入并分成 ${saved.sourceChunks.length} 个来源片段。`, { eventId: saved.eventId }));
   }
 
   async function prepareCandidateGeneration(source = activeSource): Promise<ActionResult> {
     if (!source) return setAction(result(false, "先导入一份材料，再生成候选题。"));
     const sourceChunks = state.chunks.filter((chunk) => chunk.sourceId === source.id).slice(0, 5);
     if (sourceChunks.length === 0) return setAction(result(false, "这份材料没有可用分块。请重新导入。"));
+    return prepareCandidateGenerationFromChunks(source, sourceChunks);
+  }
+
+  async function prepareCandidateGenerationFromChunks(source: SourceDocument, sourceChunks: SourceChunk[]): Promise<ActionResult> {
     const timestamp = new Date();
     const provider = state.aiConfigs[0] ?? {
       id: "local_mock",
@@ -273,9 +331,15 @@ export function useMetaLearnWorkspace() {
     await getMetaLearnDb().aiRequestPreviews.put(preview);
     await saveLearningEvent({ id: createId("event"), sourceId: source.id, appId: "metalearn-os", actionType: "ai_preview_created", outcome: "saved", createdAt: preview.createdAt });
     setAiPreview(preview);
-    setPendingCardRequest({ previewId: preview.id, source, requestedCount: 8 });
+    setPendingCardRequest({ previewId: preview.id, source, chunks: sourceChunks, requestedCount: 8 });
     await loadData();
     return setAction(result(true, "已生成 AI 上传预览，确认后才会发送片段。", { requiresConfirmation: true }));
+  }
+
+  async function importSourceAndPrepareCandidates(): Promise<ActionResult> {
+    const saved = await saveSourceFromCurrentInput();
+    if ("ok" in saved) return saved;
+    return prepareCandidateGenerationFromChunks(saved.source, saved.sourceChunks.slice(0, 5));
   }
 
   async function cancelAIRequestPreview(): Promise<ActionResult> {
@@ -291,7 +355,7 @@ export function useMetaLearnWorkspace() {
   async function confirmCandidateGeneration(): Promise<ActionResult> {
     const request = pendingCardRequest;
     if (!request) return setAction(result(false, "没有待确认的 AI 请求。"));
-    const sourceChunks = state.chunks.filter((chunk) => chunk.sourceId === request.source.id).slice(0, 5);
+    const sourceChunks = request.chunks.length > 0 ? request.chunks : state.chunks.filter((chunk) => chunk.sourceId === request.source.id).slice(0, 5);
     if (sourceChunks.length === 0) return setAction(result(false, "这份材料没有可用分块。请重新导入。"));
     const db = getMetaLearnDb();
     const confirmedAt = new Date().toISOString();
@@ -325,7 +389,7 @@ export function useMetaLearnWorkspace() {
     setAiPreview(null);
     setPendingCardRequest(null);
     await loadData();
-    return setAction(result(true, `已生成 ${payload.candidates.length} 张候选题，仍需人工审核。`));
+    return setAction(result(true, `已生成 ${payload.candidates.length} 张候选题，仍需在下方“候选题审核台”人工审核。`));
   }
 
   async function updateCandidate(candidate: CardCandidate, patch: Partial<CardCandidate>) {
@@ -983,6 +1047,9 @@ export function useMetaLearnWorkspace() {
     setSourceInputType,
     sourceText,
     setSourceText,
+    isReadingMaterialFile,
+    materialFileSummary,
+    prepareMaterialFileImport,
     searchQuery,
     setSearchQuery,
     confidence,
@@ -1044,6 +1111,7 @@ export function useMetaLearnWorkspace() {
     activeRepairTaskId,
     setActiveRepairTaskId,
     importSource,
+    importSourceAndPrepareCandidates,
     prepareCandidateGeneration,
     confirmCandidateGeneration,
     cancelAIRequestPreview,

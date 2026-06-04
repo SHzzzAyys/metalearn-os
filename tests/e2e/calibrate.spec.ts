@@ -1,5 +1,36 @@
 import { expect, test } from "@playwright/test";
 
+function escapePdfText(text: string) {
+  return text.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
+
+function createTextPdfBuffer(text: string) {
+  const lines = text.match(/.{1,76}(?:\s|$)/g)?.map((line) => line.trim()).filter(Boolean) ?? [text];
+  const textCommands = lines
+    .map((line, index) => `${index === 0 ? "72 720 Td" : "0 -18 Td"} (${escapePdfText(line)}) Tj`)
+    .join("\n");
+  const stream = `BT /F1 12 Tf ${textCommands} ET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+    `<< /Length ${Buffer.byteLength(stream, "latin1")} >>\nstream\n${stream}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+  ];
+
+  let body = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(body, "latin1"));
+    body += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xrefOffset = Buffer.byteLength(body, "latin1");
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  body += offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  return Buffer.from(body, "latin1");
+}
+
 test("MetaLearn OS completes the unified learning loop", async ({ page }) => {
   await page.goto("/");
 
@@ -8,10 +39,10 @@ test("MetaLearn OS completes the unified learning loop", async ({ page }) => {
 
   await page.goto("/library");
   await expect(page.getByRole("heading", { name: "资料库" })).toBeVisible();
-  await page.getByRole("button", { name: /保存到资料库/ }).click();
+  await page.getByRole("button", { name: "保存到资料库", exact: true }).click();
   await expect(page.getByText(/已导入并分成/)).toBeVisible();
   await expect(page.getByRole("link", { name: "我的学习材料" })).toBeVisible();
-  await page.getByRole("button", { name: /生成候选题/ }).click();
+  await page.getByRole("button", { name: "为最近材料生成候选题", exact: true }).click();
   await expect(page.getByText("将发送哪些内容")).toBeVisible();
   await expect(page.getByText("本地 mock")).toBeVisible();
   await page.getByRole("button", { name: /确认发送并生成候选题/ }).click();
@@ -45,6 +76,88 @@ test("MetaLearn OS completes the unified learning loop", async ({ page }) => {
   await expect(page.locator("body")).not.toContainText("保证变聪明");
 });
 
+test("MetaLearn OS imports a selectable text-layer PDF locally", async ({ page }) => {
+  const pdfText = "MetaLearn PDF import fixture. Active retrieval requires learners to answer before seeing source evidence. Confidence calibration detects high confidence errors.";
+
+  await page.goto("/library");
+  await page.getByLabel("学习材料文件").setInputFiles({
+    name: "retrieval-fixture.pdf",
+    mimeType: "application/pdf",
+    buffer: createTextPdfBuffer(pdfText)
+  });
+  await expect(page.locator("p").filter({ hasText: /已从 PDF 提取 1 页/ })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByLabel("材料标题")).toHaveValue("retrieval-fixture");
+  await expect(page.getByLabel("输入类型")).toHaveValue("pdf_text");
+  await expect(page.getByLabel("文本 / Markdown / PDF 提取文本")).toHaveValue(/Active retrieval requires learners/);
+
+  await page.getByRole("button", { name: "保存到资料库", exact: true }).click();
+  await expect(page.getByText(/已导入并分成/)).toBeVisible();
+  await page.getByRole("link", { name: "retrieval-fixture" }).click();
+  await expect(page.getByRole("heading", { name: "retrieval-fixture" })).toBeVisible();
+  await expect(page.getByRole("article").getByText("Active retrieval requires learners", { exact: false })).toBeVisible();
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+});
+
+test("MetaLearn OS imports a Markdown material file locally", async ({ page }) => {
+  const markdownText = [
+    "# Retrieval strategy notes",
+    "",
+    "Active recall should happen before checking source evidence.",
+    "A learner should predict confidence first, answer from memory, then compare with the source quote.",
+    "This fixture verifies that Markdown files can be selected directly instead of pasted."
+  ].join("\n");
+
+  await page.goto("/library");
+  await expect(page.getByText("选择 PDF / TXT / Markdown")).toBeVisible();
+  await page.getByLabel("学习材料文件").setInputFiles({
+    name: "retrieval-notes.md",
+    mimeType: "text/markdown",
+    buffer: Buffer.from(markdownText)
+  });
+  await expect(page.locator("p").filter({ hasText: /已读取 Markdown 文件/ })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByLabel("材料标题")).toHaveValue("retrieval-notes");
+  await expect(page.getByLabel("输入类型")).toHaveValue("markdown");
+  await expect(page.getByLabel("文本 / Markdown / PDF 提取文本")).toHaveValue(/Markdown files can be selected directly/);
+
+  await page.getByRole("button", { name: "保存到资料库", exact: true }).click();
+  await expect(page.getByText(/已导入并分成/)).toBeVisible();
+  await page.getByRole("link", { name: "retrieval-notes" }).click();
+  await expect(page.getByRole("heading", { name: "retrieval-notes" })).toBeVisible();
+  await expect(page.getByRole("article").getByText("Markdown files can be selected directly", { exact: false })).toBeVisible();
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+});
+
+test("MetaLearn OS saves a selected material file and opens candidate generation preview", async ({ page }) => {
+  const text = [
+    "Candidate generation shortcut fixture.",
+    "Learners should not mistake choosing a local file for completing the material import.",
+    "The save and generate action should create source chunks first, then show the AI upload preview before any candidate cards are generated.",
+    "This preserves the privacy boundary while making the next action clear."
+  ].join(" ");
+
+  await page.goto("/library");
+  await page.getByLabel("学习材料文件").setInputFiles({
+    name: "candidate-shortcut.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from(text)
+  });
+  await expect(page.locator("p").filter({ hasText: /当前只是读取到编辑框，还没有入库/ })).toBeVisible();
+  await page.getByRole("button", { name: "保存并生成候选题", exact: true }).click();
+  await expect(page.getByText("将发送哪些内容")).toBeVisible();
+  await expect(page.getByText("本地 mock")).toBeVisible();
+  await expect(page.getByText("确认前不会调用 AI")).toBeVisible();
+  await page.getByRole("button", { name: /确认发送并生成候选题/ }).click();
+  await expect(page.getByText("已生成 8 张候选题，仍需在下方“候选题审核台”人工审核。")).toBeVisible();
+  await expect(page.getByRole("button", { name: /批准进入复习/ }).first()).toBeVisible();
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+});
+
 test("MetaLearn OS creates a review card manually from material evidence", async ({ page }) => {
   let aiCardCalls = 0;
   await page.route("**/api/ai/cards", async (route) => {
@@ -53,7 +166,7 @@ test("MetaLearn OS creates a review card manually from material evidence", async
   });
 
   await page.goto("/library");
-  await page.getByRole("button", { name: /保存到资料库/ }).click();
+  await page.getByRole("button", { name: "保存到资料库", exact: true }).click();
   await expect(page.getByText(/已导入并分成/)).toBeVisible();
   const materialLink = page.getByRole("link", { name: "我的学习材料" });
   await expect(materialLink).toBeVisible();
@@ -94,7 +207,7 @@ test("MetaLearn OS creates a review card manually from material evidence", async
 
 test("MetaLearn OS restores a usable workspace from exported JSON", async ({ page }) => {
   await page.goto("/library");
-  await page.getByRole("button", { name: /保存到资料库/ }).click();
+  await page.getByRole("button", { name: "保存到资料库", exact: true }).click();
   await expect(page.getByText(/已导入并分成/)).toBeVisible();
   const materialLink = page.getByRole("link", { name: "我的学习材料" });
   await expect(materialLink).toBeVisible();
@@ -117,7 +230,7 @@ test("MetaLearn OS restores a usable workspace from exported JSON", async ({ pag
   await expect(page.getByText("本地数据已清空")).toBeVisible();
 
   await page.goto("/library");
-  await page.locator('input[type="file"]').setInputFiles(exportPath!);
+  await page.getByLabel("选择 JSON 导出包").setInputFiles(exportPath!);
   await expect(page.getByText("导入预览已生成")).toBeVisible();
   await expect(page.getByText("全量备份", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /确认导入/ }).click();
@@ -138,7 +251,7 @@ test("MetaLearn OS restores a usable workspace from exported JSON", async ({ pag
 
 test("MetaLearn OS creates and resolves high-confidence repair tasks", async ({ page }) => {
   await page.goto("/library");
-  await page.getByRole("button", { name: /保存到资料库/ }).click();
+  await page.getByRole("button", { name: "保存到资料库", exact: true }).click();
   await expect(page.getByText(/已导入并分成/)).toBeVisible();
   const materialLink = page.getByRole("link", { name: "我的学习材料" });
   await expect(materialLink).toBeVisible();
@@ -185,7 +298,7 @@ test("MetaLearn OS creates and resolves high-confidence repair tasks", async ({ 
 
 test("MetaLearn OS rejects invalid JSON imports before writing data", async ({ page }) => {
   await page.goto("/library");
-  await page.locator('input[type="file"]').setInputFiles({
+  await page.getByLabel("选择 JSON 导出包").setInputFiles({
     name: "broken.json",
     mimeType: "application/json",
     buffer: Buffer.from("{")

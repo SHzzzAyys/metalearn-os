@@ -43,7 +43,7 @@ New product work should land in `apps/metalearn-os` first.
 Implemented:
 
 - local-first PWA-style Next.js app;
-- text, Markdown, and pasted PDF text-layer import;
+- text and Markdown paste or file import, plus selectable text-layer PDF file extraction;
 - automatic chunking;
 - AI upload preview before any generation request;
 - local mock AI provider by default;
