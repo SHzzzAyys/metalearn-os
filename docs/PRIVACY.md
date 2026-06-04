@@ -10,6 +10,8 @@ MetaLearn OS is designed as a local-first learning tool. Learning materials, sel
 - No payment or analytics provider is integrated.
 - Export is user-triggered.
 - Material file import is user-triggered and reads supported PDF, TXT, and Markdown files locally in the browser; scanned-PDF OCR is not implemented.
+- Selecting a material file does not write IndexedDB and does not upload data. It only fills the local text preview until the user clicks a save action.
+- Saving a material creates local `SourceDocument` and `SourceChunk` records. Candidate generation is a separate step and still requires AI upload preview confirmation.
 - JSON import/restore is user-triggered and parsed locally in the browser.
 - Local deletion clears the IndexedDB tables.
 - AI generation uses a local mock provider by default.
@@ -23,11 +25,15 @@ Every AI request preview should show:
 - provider mode;
 - provider name;
 - model name;
+- source title when available;
 - chunk count;
+- short chunk summaries;
 - payload summary;
 - source id when relevant.
 
 Confirmation must happen before generation.
+
+If generation fails, the saved material and chunks should remain local. The recovery path is manual card creation from a source chunk, not retrying blindly or silently creating unsupported cards.
 
 ## Export and Delete
 

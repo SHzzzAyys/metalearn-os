@@ -84,6 +84,33 @@ Acceptance criteria:
 - high-confidence errors become actionable repair tasks;
 - tag-level overconfidence is backed by review logs, not guessed.
 
+## v0.3.1 - Material Import and Candidate Generation Reliability
+
+Status: implemented patch.
+
+Goal: make the material import and candidate-generation path visible, diagnosable, and recoverable.
+
+Included:
+
+- explicit material import stages from file reading through candidate generation;
+- local text-quality analysis for short materials, likely scanned PDFs, whitespace-heavy extraction, and garbled text;
+- separate material-file import and JSON restore inputs;
+- `保存并生成候选题` as the primary path from source save to upload preview;
+- AI request previews that show source title, chunk count, and chunk summaries;
+- candidate generation from a locked chunk snapshot instead of relying on asynchronous UI state refresh;
+- diagnostic messages for unsaved files, missing chunks, pending preview confirmation, failed generation, and existing candidates;
+- candidate review bench counts for all pending candidates, current material candidates, and recently generated candidates;
+- manual-card fallback when AI generation fails.
+
+Acceptance criteria:
+
+- choosing a file is never treated as saving a material;
+- PDF/TXT/Markdown files can enter the main flow through file selection;
+- PDFs without enough readable text show an OCR limitation instead of silently failing;
+- generation success always leads to visible candidate review work;
+- generation failure preserves the material and exposes manual card creation;
+- no account, cloud sync, OCR, auto-approval, or AI answer grading is introduced.
+
 ## v0.4.0 - Explanation Versions and Insight Quality
 
 Goal: make Feynman explanations and insights evidence-driven.

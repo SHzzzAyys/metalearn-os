@@ -47,6 +47,27 @@ SourceChunk.sourceId -> SourceDocument.id
 
 Cards generated from explanations use a source id shaped around the explanation version and must still remain visible to the user as explanation-derived evidence.
 
+## Material Import Runtime State
+
+Material file reading and candidate-generation diagnosis are client runtime state, not IndexedDB schema. This keeps schema `v4` stable while making the import flow observable.
+
+The runtime draft tracks:
+
+- current import stage;
+- file name and file kind;
+- title and input type;
+- extracted text length;
+- PDF page count when available;
+- saved source id;
+- chunk count;
+- AI preview id;
+- recently generated candidate ids;
+- blocking error when a step fails.
+
+The derived diagnostic reads the runtime draft plus local `SourceDocument`, `SourceChunk`, `AIRequestPreview`, and `CardCandidate` records. It should explain whether the next action is to read a file, save a source, create a preview, confirm a preview, review candidates, or create cards manually.
+
+Important boundary: selecting a file does not create `SourceDocument` or `SourceChunk` records. Those records exist only after the user saves the material.
+
 ## Candidate Approval Rules
 
 A candidate must not become an approved card unless it has:

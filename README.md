@@ -44,6 +44,7 @@ Implemented:
 
 - local-first PWA-style Next.js app;
 - text and Markdown paste or file import, plus selectable text-layer PDF file extraction;
+- visible material import stages, text-quality checks, and candidate-generation diagnostics;
 - automatic chunking;
 - AI upload preview before any generation request;
 - local mock AI provider by default;
@@ -62,6 +63,15 @@ Implemented:
 - CSV and Anki TSV export;
 - one-step data export and two-step local deletion;
 - desktop and mobile E2E coverage.
+
+Material import has an explicit reliability contract:
+
+- choosing a PDF/TXT/Markdown file only reads text into the local editor; it does not create a material record;
+- `保存并生成候选题` first saves the source and chunks locally, then creates an AI upload preview;
+- candidate generation uses the chunk snapshot captured by the preview, so it does not depend on delayed React state refreshes;
+- generated cards remain candidates until the learner edits, rejects, or approves them;
+- PDFs must have a selectable text layer. Scanned PDFs are rejected with an OCR limitation message instead of failing silently;
+- if generation fails, the saved material remains available and the user can create cards manually from source chunks.
 
 Out of scope for the current beta:
 
@@ -174,6 +184,7 @@ Live provider integration should stay server-side and preserve the same preview 
 
 - Learning data stays in the browser's IndexedDB by default.
 - User materials are not sent to any model before the user confirms the AI request preview.
+- Selecting a material file is local-only and does not save or upload it; source chunks are created only after the user saves the material.
 - Exports are user-triggered local downloads.
 - Local deletion clears all IndexedDB tables.
 - The product should not contain public claims such as "guaranteed improvement", "become smarter", or unsupported learning outcomes.

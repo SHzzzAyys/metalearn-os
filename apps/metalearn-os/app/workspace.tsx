@@ -69,6 +69,7 @@ import {
   TextLink
 } from "@metalearn/ui";
 import { useMetaLearnWorkspace } from "./use-metalearn-workspace";
+import type { CandidateGenerationDiagnostic, MaterialImportDraft, MaterialTextQuality } from "./material-import-state";
 import { deriveMaterialDetail, viewMeta } from "./workspace-selectors";
 
 type Workspace = ReturnType<typeof useMetaLearnWorkspace>;
@@ -102,6 +103,14 @@ export function MetaLearnOSPage({ view, sourceId, reviewMode = "main" }: { view:
     const taskId = new URLSearchParams(window.location.search).get("repairTaskId");
     if (taskId && taskId !== workspace.activeRepairTaskId) void workspace.startRepairExplanation(taskId);
   }, [view, workspace]);
+
+  useEffect(() => {
+    if (view !== "library" || workspace.materialImportDraft.stage !== "candidates_ready") return;
+    const timeout = window.setTimeout(() => {
+      document.getElementById("candidate-review")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+    return () => window.clearTimeout(timeout);
+  }, [view, workspace.materialImportDraft.stage, workspace.materialImportDraft.updatedAt]);
 
   const actions = (
     <>
@@ -142,7 +151,7 @@ export function MetaLearnOSPage({ view, sourceId, reviewMode = "main" }: { view:
             { label: "高信心错误", value: `${Math.round(derived.metrics.highConfidenceErrorRate * 100)}%`, detail: "4-5 档错误率", tone: derived.highConfidenceErrors.length ? "danger" : "neutral" }
           ]}
         />
-        {workspace.aiPreview ? <AIRequestPreviewPanel preview={workspace.aiPreview} onConfirm={workspace.confirmCandidateGeneration} onCancel={workspace.cancelAIRequestPreview} /> : null}
+        {workspace.aiPreview ? <AIRequestPreviewPanel workspace={workspace} preview={workspace.aiPreview} onConfirm={workspace.confirmCandidateGeneration} onCancel={workspace.cancelAIRequestPreview} /> : null}
         {view === "home" ? <HomeView workspace={workspace} /> : null}
         {view === "library" ? sourceId ? <MaterialDetailView workspace={workspace} sourceId={sourceId} /> : <LibraryView workspace={workspace} /> : null}
         {view === "review" && reviewMode === "main" ? <ReviewView workspace={workspace} /> : null}
@@ -156,7 +165,9 @@ export function MetaLearnOSPage({ view, sourceId, reviewMode = "main" }: { view:
   );
 }
 
-function AIRequestPreviewPanel({ preview, onConfirm, onCancel }: { preview: AIRequestPreview; onConfirm: () => Promise<unknown>; onCancel: () => Promise<unknown> }) {
+function AIRequestPreviewPanel({ workspace, preview, onConfirm, onCancel }: { workspace: Workspace; preview: AIRequestPreview; onConfirm: () => Promise<unknown>; onCancel: () => Promise<unknown> }) {
+  const source = preview.sourceId ? workspace.state.sources.find((item) => item.id === preview.sourceId) : undefined;
+  const previewChunks = workspace.state.chunks.filter((chunk) => preview.chunkIds.includes(chunk.id));
   return (
     <Panel className="border-emerald-200 bg-emerald-50/80">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -165,10 +176,20 @@ function AIRequestPreviewPanel({ preview, onConfirm, onCancel }: { preview: AIRe
             <Badge>上传前预览</Badge>
             <Badge>{preview.providerMode === "local_mock" ? "本地 mock" : preview.providerName}</Badge>
             <Badge>{preview.chunkCount} 个片段</Badge>
+            {source ? <Badge>{source.title}</Badge> : null}
           </div>
           <h3 className="mt-3 text-2xl font-semibold tracking-[-0.02em]">将发送哪些内容</h3>
           <p className="mt-2 max-w-[78ch] text-sm leading-6 text-emerald-950">{preview.payloadSummary}</p>
           <p className="mt-2 text-xs text-emerald-800">确认前不会调用 AI。所有输出仍是候选内容，需要你审核。</p>
+          {previewChunks.length > 0 ? (
+            <div className="mt-4 grid gap-2">
+              {previewChunks.slice(0, 3).map((chunk) => (
+                <div key={chunk.id} className="rounded-2xl border border-emerald-100 bg-white/70 px-3 py-2 text-xs leading-5 text-emerald-950">
+                  <span className="font-semibold">片段 #{chunk.index + 1}</span> · {chunk.text.replace(/\s+/g, " ").slice(0, 180)}
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => void onConfirm()}>
@@ -235,6 +256,13 @@ function HomeView({ workspace }: { workspace: Workspace }) {
 
 function LibraryView({ workspace }: { workspace: Workspace }) {
   const { derived, state } = workspace;
+  const draft = workspace.materialImportDraft;
+  const quality = workspace.materialTextQuality;
+  const diagnostic = workspace.candidateDiagnostic;
+  const currentSource = diagnostic.sourceId ? state.sources.find((source) => source.id === diagnostic.sourceId) : undefined;
+  const currentChunkIds = new Set(state.chunks.filter((chunk) => chunk.sourceId === diagnostic.sourceId).map((chunk) => chunk.id));
+  const currentMaterialCandidateCount = derived.pendingCandidates.filter((candidate) => currentChunkIds.has(candidate.sourceChunkId)).length;
+  const recentCandidateIds = new Set(draft.candidateIds);
   async function handleMaterialFile(event: ChangeEvent<HTMLInputElement>) {
     const input = event.currentTarget;
     const file = input.files?.[0];
@@ -246,59 +274,79 @@ function LibraryView({ workspace }: { workspace: Workspace }) {
   return (
     <section className="grid gap-5 xl:grid-cols-[1fr_430px]">
       <Panel>
-        <h3 className="text-2xl font-semibold tracking-[-0.02em]">导入材料</h3>
-        <p className="mt-1 text-sm text-zinc-600">支持粘贴文本，也支持选择 PDF、TXT、Markdown 文件。文件只在本地浏览器读取，不上传；扫描件 PDF 暂不做 OCR。</p>
-        <div className="mt-5 grid gap-4 md:grid-cols-[1fr_180px_180px]">
-          <Field label="材料标题">
-            <TextInput value={workspace.title} onChange={(event) => workspace.setTitle(event.target.value)} />
-          </Field>
-          <Field label="学习模板">
-            <TemplateSelect value={workspace.templateId} onChange={workspace.setTemplateId} />
-          </Field>
-          <Field label="输入类型">
-            <InputTypeSelect value={workspace.sourceInputType} onChange={workspace.setSourceInputType} />
-          </Field>
-        </div>
-        <div className="mt-4">
-          <div className="grid gap-2">
-            <p className="text-sm font-medium text-zinc-900">学习材料文件</p>
-            <input
-              id="material-file-input"
-              className="sr-only"
-              type="file"
-              accept=".pdf,.txt,.md,.markdown,application/pdf,text/plain,text/markdown"
-              aria-label="学习材料文件"
-              disabled={workspace.isReadingMaterialFile}
-              onChange={(event) => void handleMaterialFile(event)}
-            />
-            <label
-              htmlFor="material-file-input"
-              className="inline-flex min-h-11 w-fit cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white/90 px-4 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50 focus-within:ring-2 focus-within:ring-emerald-500"
-            >
-              <Upload size={16} /> {workspace.isReadingMaterialFile ? "读取文件中" : "选择 PDF / TXT / Markdown"}
-            </label>
-            <span className="text-xs text-zinc-500">选择后会先把文本放到下方文本框。此时还没有入库，必须保存后才能生成候选题。</span>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h3 className="text-2xl font-semibold tracking-[-0.02em]">导入材料</h3>
+            <p className="mt-1 max-w-[76ch] text-sm leading-6 text-zinc-600">选择文件只会读取到本地文本框，不等于入库。保存后才会生成 source chunks；AI 生成前还必须确认上传预览。</p>
           </div>
-          {workspace.materialFileSummary ? <p className="mt-2 text-sm font-medium text-emerald-800">{workspace.materialFileSummary}</p> : null}
+          <Badge>{stageLabel(draft.stage)}</Badge>
         </div>
-        <div className="mt-4">
-          <Field label="文本 / Markdown / PDF 提取文本" hint={workspace.isReadingMaterialFile ? "正在本地读取文件文本..." : "也可以直接粘贴文本。PDF 必须有可复制文本层。"}>
-            <TextArea value={workspace.sourceText} onChange={(event) => workspace.setSourceText(event.target.value)} className="min-h-56" />
-          </Field>
-        </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Button disabled={workspace.isReadingMaterialFile} onClick={() => void workspace.importSource()}>
-            <Upload size={16} /> {workspace.isReadingMaterialFile ? "读取文件中" : "保存到资料库"}
-          </Button>
-          <Button disabled={workspace.isReadingMaterialFile} onClick={() => void workspace.importSourceAndPrepareCandidates()}>
-            <Sparkles size={16} /> 保存并生成候选题
-          </Button>
-          <SecondaryButton onClick={() => void workspace.prepareCandidateGeneration(state.sources[0])}>
-            <Sparkles size={16} /> 为最近材料生成候选题
-          </SecondaryButton>
-          <SecondaryButton onClick={() => void workspace.startManualCard(state.sources[0]?.id)}>
-            <FileText size={16} /> 手工建卡
-          </SecondaryButton>
+
+        <div className="mt-5 grid gap-5">
+          <div className="rounded-2xl border border-zinc-100 bg-zinc-50/70 p-4">
+            <SectionHeader title="文件与模板" detail="PDF 只支持可复制文本层；TXT 和 Markdown 会直接读取文本。JSON 备份包在右侧“导入与恢复”处理。" />
+            <div className="mt-4 grid gap-4 md:grid-cols-[1fr_180px_180px]">
+              <Field label="材料标题">
+                <TextInput value={workspace.title} onChange={(event) => workspace.setTitle(event.target.value)} />
+              </Field>
+              <Field label="学习模板">
+                <TemplateSelect value={workspace.templateId} onChange={workspace.setTemplateId} />
+              </Field>
+              <Field label="输入类型">
+                <InputTypeSelect value={workspace.sourceInputType} onChange={workspace.setSourceInputType} />
+              </Field>
+            </div>
+            <div className="mt-4 grid gap-2">
+              <p className="text-sm font-medium text-zinc-900">学习材料文件</p>
+              <input
+                id="material-file-input"
+                className="sr-only"
+                type="file"
+                accept=".pdf,.txt,.md,.markdown,application/pdf,text/plain,text/markdown"
+                aria-label="学习材料文件"
+                disabled={workspace.isReadingMaterialFile}
+                onChange={(event) => void handleMaterialFile(event)}
+              />
+              <label
+                htmlFor="material-file-input"
+                className="inline-flex min-h-11 w-fit max-w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white/90 px-4 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50 focus-within:ring-2 focus-within:ring-emerald-500"
+              >
+                <Upload size={16} /> {workspace.isReadingMaterialFile ? "读取文件中" : "选择 PDF / TXT / Markdown"}
+              </label>
+              <span className="text-xs leading-5 text-zinc-500">当前文件：{draft.fileName ?? "未选择"}。选择后先进入文本预览，不会创建材料，也不会调用 AI。</span>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-zinc-100 bg-white/70 p-4">
+            <SectionHeader title="文本预览" detail="保存前请确认这里有真实可读内容。扫描件 PDF 不会静默入库，会提示换可复制文本层或手动粘贴。" />
+            <div className="mt-4">
+              <Field label="文本 / Markdown / PDF 提取文本" hint={workspace.isReadingMaterialFile ? "正在本地读取文件文本..." : "也可以直接粘贴文本。PDF 必须有可复制文本层。"}>
+                <TextArea value={workspace.sourceText} onChange={(event) => workspace.setSourceText(event.target.value)} className="min-h-56" />
+              </Field>
+            </div>
+            <MaterialTextQualityPanel quality={quality} />
+          </div>
+
+          <div className="rounded-2xl border border-zinc-100 bg-zinc-50/70 p-4">
+            <SectionHeader title="下一步操作" detail="主路径是保存并生成候选题：先写入本地资料库，再创建上传预览，最后由你确认生成。" />
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button disabled={workspace.isReadingMaterialFile || Boolean(quality.blockingError)} onClick={() => void workspace.importSourceAndPrepareCandidates()}>
+                <Sparkles size={16} /> 保存并生成候选题
+              </Button>
+              <SecondaryButton disabled={workspace.isReadingMaterialFile || Boolean(quality.blockingError)} onClick={() => void workspace.importSource()}>
+                <Upload size={16} /> 仅保存到资料库
+              </SecondaryButton>
+              <SecondaryButton onClick={() => void workspace.prepareRecentCandidateGeneration()}>
+                <Sparkles size={16} /> 为最近材料生成候选题
+              </SecondaryButton>
+              <SecondaryButton disabled={!currentSource} onClick={() => void workspace.startManualCard(currentSource?.id ?? state.sources[0]?.id)}>
+                <FileText size={16} /> 改为手工建卡
+              </SecondaryButton>
+              {currentSource ? <TextLink href={`/library/${currentSource.id}`}>打开材料详情</TextLink> : null}
+            </div>
+          </div>
+
+          <CandidateGenerationDiagnosticPanel diagnostic={diagnostic} draft={draft} />
         </div>
         <MaterialStatusFlow sources={state.sources} />
         {workspace.manualCardForm.isOpen ? <ManualCardPanel workspace={workspace} /> : null}
@@ -318,7 +366,7 @@ function LibraryView({ workspace }: { workspace: Workspace }) {
           ))}
         </div>
       </Panel>
-      <Panel className="xl:col-span-2">
+      <Panel id="candidate-review" className="xl:col-span-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-2xl font-semibold tracking-[-0.02em]">候选题审核台</h3>
@@ -326,19 +374,100 @@ function LibraryView({ workspace }: { workspace: Workspace }) {
           </div>
           <div className="flex flex-wrap gap-2">
             <Badge>{derived.pendingCandidates.length} 待审核</Badge>
+            <Badge>当前材料 {currentMaterialCandidateCount}</Badge>
+            <Badge>最近生成 {draft.candidateIds.length}</Badge>
             <SecondaryButton onClick={() => void workspace.approveAllCandidates()}>
               <Check size={16} /> 批量批准
             </SecondaryButton>
           </div>
         </div>
         <div className="mt-5 grid gap-4 lg:grid-cols-2">
-          {derived.pendingCandidates.length === 0 ? <EmptyState title="没有候选题" detail="先为一份材料生成候选题。无来源片段的问题会被挡在队列外。" /> : null}
+          {derived.pendingCandidates.length === 0 ? (
+            <EmptyState title="没有候选题" detail={diagnostic.blockingReason ?? "先为一份材料生成候选题。无来源片段的问题会被挡在队列外。"} />
+          ) : null}
           {derived.pendingCandidates.slice(0, 8).map((candidate: CardCandidate) => (
-            <CandidateEditor key={candidate.id} candidate={candidate} workspace={workspace} />
+            <CandidateEditor key={candidate.id} candidate={candidate} workspace={workspace} highlighted={recentCandidateIds.has(candidate.id)} />
           ))}
         </div>
       </Panel>
     </section>
+  );
+}
+
+function MaterialTextQualityPanel({ quality }: { quality: MaterialTextQuality }) {
+  return (
+    <div className="mt-4 grid gap-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <MaterialStat label="字符" value={quality.charCount} />
+        <MaterialStat label="预计 chunk" value={quality.chunkEstimate} />
+        <MaterialStat label="行数" value={quality.lineCount} />
+        <MaterialStat label="PDF 页数" value={quality.pageCount ?? 0} />
+      </div>
+      {quality.blockingError ? <InlineError message={quality.blockingError} /> : null}
+      {quality.warnings.length > 0 ? (
+        <div className="grid gap-2">
+          {quality.warnings.map((warning) => (
+            <div key={warning} className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-950">
+              {warning}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-zinc-500">文本质量暂无阻断问题。生成前仍建议快速扫一眼来源是否可读。</p>
+      )}
+    </div>
+  );
+}
+
+function CandidateGenerationDiagnosticPanel({ diagnostic, draft }: { diagnostic: CandidateGenerationDiagnostic; draft: MaterialImportDraft }) {
+  return (
+    <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4">
+      <SectionHeader title="生成诊断" detail="这里说明候选题卡在哪一步，以及下一步应该做什么。" />
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <DiagnosticLine label="当前阶段" value={stageLabel(draft.stage)} />
+        <DiagnosticLine label="当前材料" value={diagnostic.sourceTitle ?? "未入库"} />
+        <DiagnosticLine label="chunk" value={String(diagnostic.chunkCount)} />
+        <DiagnosticLine label="预览状态" value={diagnostic.lastPreviewStatus ?? "无"} />
+        <DiagnosticLine label="候选题" value={String(diagnostic.pendingCandidateCount)} />
+      </div>
+      <div className="mt-4 flex flex-col gap-2 rounded-2xl bg-white/75 p-4 text-sm leading-6 text-zinc-700">
+        <p>
+          <span className="font-semibold text-zinc-950">下一步：</span>
+          {nextActionLabel(diagnostic.nextAction)}
+        </p>
+        {diagnostic.blockingReason ? <p className="text-rose-800">{diagnostic.blockingReason}</p> : null}
+        {draft.generatedCandidateCount ? <p className="text-emerald-800">最近生成 {draft.generatedCandidateCount} 张候选题，仍需人工审核。</p> : null}
+      </div>
+    </div>
+  );
+}
+
+function MaterialGenerationDiagnosticPanel({ diagnostic }: { diagnostic: CandidateGenerationDiagnostic }) {
+  return (
+    <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50/55 p-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-emerald-950">候选题生成诊断</p>
+          <p className="mt-1 text-sm leading-6 text-emerald-900">{nextActionLabel(diagnostic.nextAction)}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Badge>chunk {diagnostic.chunkCount}</Badge>
+          <Badge>待审 {diagnostic.pendingCandidateCount}</Badge>
+          <Badge>{diagnostic.lastPreviewStatus ?? "无预览"}</Badge>
+        </div>
+      </div>
+      {diagnostic.blockingReason ? <p className="mt-3 rounded-2xl bg-white/75 px-3 py-2 text-sm leading-6 text-rose-800">{diagnostic.blockingReason}</p> : null}
+      {diagnostic.lastGeneratedAt ? <p className="mt-2 text-xs text-emerald-800">最近生成：{formatDate(diagnostic.lastGeneratedAt)}</p> : null}
+    </div>
+  );
+}
+
+function DiagnosticLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-2xl bg-white/75 p-3">
+      <p className="text-xs font-semibold tracking-[0.08em] text-zinc-500">{label}</p>
+      <p className="mt-2 break-words text-sm font-semibold text-zinc-950">{value}</p>
+    </div>
   );
 }
 
@@ -488,6 +617,7 @@ function MaterialDetailView({ workspace, sourceId }: { workspace: Workspace; sou
 
   const archived = source.status === "archived";
   const canWork = !archived && detail.chunks.length > 0;
+  const diagnostic = workspace.getCandidateDiagnostic(source.id);
   return (
     <section className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
       <div className="grid min-w-0 gap-5">
@@ -535,8 +665,10 @@ function MaterialDetailView({ workspace, sourceId }: { workspace: Workspace; sou
             <MaterialStat label="复习" value={detail.statusCounts.reviewLogs} />
             <MaterialStat label="解释" value={detail.statusCounts.explanations} />
           </div>
+          <MaterialGenerationDiagnosticPanel diagnostic={diagnostic} />
           {archived ? <InlineError message="这份材料已归档。证据仍可查看，但生成候选题和手工建卡已暂停。" /> : null}
           {!archived && detail.chunks.length === 0 ? <InlineError message="这份材料没有可用来源片段。请重新导入文本层材料。" /> : null}
+          {!archived && diagnostic.blockingReason && diagnostic.nextAction === "manual_card" ? <InlineError message={diagnostic.blockingReason} /> : null}
           {workspace.manualCardForm.isOpen && workspace.manualCardForm.sourceId === source.id ? <ManualCardPanel workspace={workspace} /> : null}
         </Panel>
 
@@ -1161,14 +1293,15 @@ function ManualCardPanel({ workspace }: { workspace: Workspace }) {
   );
 }
 
-function CandidateEditor({ candidate, workspace }: { candidate: CardCandidate; workspace: Workspace }) {
+function CandidateEditor({ candidate, workspace, highlighted = false }: { candidate: CardCandidate; workspace: Workspace; highlighted?: boolean }) {
   const validation = validateCardCandidateEvidence(candidate, workspace.state.chunks);
   const chunk = validation.chunk ?? workspace.state.chunks.find((item) => item.id === candidate.sourceChunkId);
   const source = chunk ? workspace.state.sources.find((item) => item.id === chunk.sourceId) : undefined;
   return (
-    <article className="min-w-0 rounded-[1.25rem] bg-white/75 p-4 shadow-sm">
+    <article className={`min-w-0 rounded-[1.25rem] p-4 shadow-sm ${highlighted ? "border border-emerald-200 bg-emerald-50/80" : "bg-white/75"}`}>
       <div className="flex flex-wrap items-center gap-2">
         <Badge>{candidate.cardType}</Badge>
+        {highlighted ? <Badge>最近生成</Badge> : null}
         <span className="text-xs text-zinc-500">难度 {candidate.difficulty}</span>
         <span className="text-xs text-zinc-500">{source ? `${source.title} · 片段 #${(chunk?.index ?? 0) + 1}` : "来源缺失，需要修复"}</span>
       </div>
@@ -1274,6 +1407,33 @@ function MaterialStatusFlow({ sources }: { sources: SourceDocument[] }) {
       </div>
     </div>
   );
+}
+
+function stageLabel(stage: MaterialImportDraft["stage"]): string {
+  const labels: Record<MaterialImportDraft["stage"], string> = {
+    idle: "未开始",
+    file_reading: "读取文件",
+    text_ready: "文本已读取，未入库",
+    saving_source: "保存材料中",
+    source_saved: "材料已入库",
+    preview_ready: "上传预览待确认",
+    generating_candidates: "生成候选题中",
+    candidates_ready: "候选题已生成",
+    failed: "流程失败"
+  };
+  return labels[stage];
+}
+
+function nextActionLabel(action: CandidateGenerationDiagnostic["nextAction"]): string {
+  const labels: Record<CandidateGenerationDiagnostic["nextAction"], string> = {
+    read_file: "选择 PDF / TXT / Markdown，或粘贴一段真实材料。",
+    save_source: "点击“保存并生成候选题”或“仅保存到资料库”，先把文本写入本地资料库。",
+    create_preview: "点击“生成候选题”，创建上传预览。",
+    confirm_preview: "检查上传预览后点击“确认发送并生成候选题”。",
+    review_candidates: "到下方候选题审核台编辑、拒绝或批准候选题。",
+    manual_card: "改为从来源片段手工建卡，避免卡在 AI 生成步骤。"
+  };
+  return labels[action];
 }
 
 function TemplateSelect({ value, onChange }: { value: LearningTemplateId; onChange: (value: LearningTemplateId) => void }) {

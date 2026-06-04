@@ -42,6 +42,8 @@ High-value unit tests should cover:
 - high-confidence repair task creation and resolution;
 - review queue ordering;
 - source traceability through chunks;
+- material text quality analysis for short text, scanned-PDF risk, whitespace-heavy text, and garbled extraction;
+- candidate generation diagnostics for unsaved text, saved sources without chunks, pending previews, failed previews, and existing candidates;
 - tag overconfidence;
 - passive learning risk;
 - prediction bias;
@@ -58,6 +60,8 @@ High-value unit tests should cover:
 Important integration paths:
 
 - import material -> chunk -> preview -> candidates;
+- file selection -> text preview -> save and generate -> upload preview -> candidate review bench;
+- failed AI candidate generation -> saved material remains available -> manual card creation;
 - edit candidate -> approve -> review queue;
 - high-confidence error -> mistake reason -> explanation repair;
 - high-confidence error -> repair task -> source/Feynman/remedial card -> resolved;
@@ -71,8 +75,12 @@ Important integration paths:
 Desktop and mobile should cover:
 
 - first material import;
+- PDF/TXT/Markdown file selection and visible local text preview;
+- unsaved selected file cannot be treated as an imported material;
+- text-layer PDF succeeds and scanned/no-text PDF shows an OCR limitation;
 - AI request preview;
 - candidate generation and approval;
+- AI failure shows a concrete error and manual-card fallback;
 - review with confidence prediction;
 - strict review state machine and keyboard shortcuts;
 - high-confidence error repair task visibility;
@@ -95,6 +103,7 @@ Recommended visual targets:
 - insights desktop;
 - settings mobile.
 - library import preview, success report, and failure state.
+- library material import stages, text-quality warnings, candidate-generation diagnostic, and candidate review highlight.
 
 Recommended accessibility checks:
 

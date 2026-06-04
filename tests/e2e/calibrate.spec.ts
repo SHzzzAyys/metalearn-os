@@ -39,7 +39,7 @@ test("MetaLearn OS completes the unified learning loop", async ({ page }) => {
 
   await page.goto("/library");
   await expect(page.getByRole("heading", { name: "资料库" })).toBeVisible();
-  await page.getByRole("button", { name: "保存到资料库", exact: true }).click();
+  await page.getByRole("button", { name: "仅保存到资料库", exact: true }).click();
   await expect(page.getByText(/已导入并分成/)).toBeVisible();
   await expect(page.getByRole("link", { name: "我的学习材料" })).toBeVisible();
   await page.getByRole("button", { name: "为最近材料生成候选题", exact: true }).click();
@@ -85,12 +85,12 @@ test("MetaLearn OS imports a selectable text-layer PDF locally", async ({ page }
     mimeType: "application/pdf",
     buffer: createTextPdfBuffer(pdfText)
   });
-  await expect(page.locator("p").filter({ hasText: /已从 PDF 提取 1 页/ })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText(/已从 PDF 提取 1 页/).first()).toBeVisible({ timeout: 20_000 });
   await expect(page.getByLabel("材料标题")).toHaveValue("retrieval-fixture");
   await expect(page.getByLabel("输入类型")).toHaveValue("pdf_text");
   await expect(page.getByLabel("文本 / Markdown / PDF 提取文本")).toHaveValue(/Active retrieval requires learners/);
 
-  await page.getByRole("button", { name: "保存到资料库", exact: true }).click();
+  await page.getByRole("button", { name: "仅保存到资料库", exact: true }).click();
   await expect(page.getByText(/已导入并分成/)).toBeVisible();
   await page.getByRole("link", { name: "retrieval-fixture" }).click();
   await expect(page.getByRole("heading", { name: "retrieval-fixture" })).toBeVisible();
@@ -98,6 +98,34 @@ test("MetaLearn OS imports a selectable text-layer PDF locally", async ({ page }
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
+});
+
+test("MetaLearn OS blocks candidate generation when a selected file has not been saved", async ({ page }) => {
+  const text = "Unsaved file fixture. The app must not treat a selected local file as an imported source until the user saves it into the local library.";
+
+  await page.goto("/library");
+  await page.getByLabel("学习材料文件").setInputFiles({
+    name: "unsaved-fixture.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from(text)
+  });
+  await expect(page.getByText("文本已读取，未入库").first()).toBeVisible();
+  await page.getByRole("button", { name: "为最近材料生成候选题", exact: true }).click();
+  await expect(page.getByText("文件已读取到编辑框，但还没有保存为材料。").first()).toBeVisible();
+  await expect(page.getByText("将发送哪些内容")).not.toBeVisible();
+});
+
+test("MetaLearn OS rejects PDFs without enough readable text layer", async ({ page }) => {
+  await page.goto("/library");
+  await page.getByLabel("学习材料文件").setInputFiles({
+    name: "scanned-empty.pdf",
+    mimeType: "application/pdf",
+    buffer: createTextPdfBuffer("")
+  });
+
+  await expect(page.getByText("这个 PDF 没有足够的可读取文本层。当前版本不做扫描件 OCR，请换成可复制文本的 PDF，或手工粘贴文本。").first()).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("link", { name: "scanned-empty" })).not.toBeVisible();
+  await expect(page.getByText("将发送哪些内容")).not.toBeVisible();
 });
 
 test("MetaLearn OS imports a Markdown material file locally", async ({ page }) => {
@@ -116,12 +144,12 @@ test("MetaLearn OS imports a Markdown material file locally", async ({ page }) =
     mimeType: "text/markdown",
     buffer: Buffer.from(markdownText)
   });
-  await expect(page.locator("p").filter({ hasText: /已读取 Markdown 文件/ })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText(/已读取 Markdown 文件/).first()).toBeVisible({ timeout: 10_000 });
   await expect(page.getByLabel("材料标题")).toHaveValue("retrieval-notes");
   await expect(page.getByLabel("输入类型")).toHaveValue("markdown");
   await expect(page.getByLabel("文本 / Markdown / PDF 提取文本")).toHaveValue(/Markdown files can be selected directly/);
 
-  await page.getByRole("button", { name: "保存到资料库", exact: true }).click();
+  await page.getByRole("button", { name: "仅保存到资料库", exact: true }).click();
   await expect(page.getByText(/已导入并分成/)).toBeVisible();
   await page.getByRole("link", { name: "retrieval-notes" }).click();
   await expect(page.getByRole("heading", { name: "retrieval-notes" })).toBeVisible();
@@ -145,7 +173,7 @@ test("MetaLearn OS saves a selected material file and opens candidate generation
     mimeType: "text/plain",
     buffer: Buffer.from(text)
   });
-  await expect(page.locator("p").filter({ hasText: /当前只是读取到编辑框，还没有入库/ })).toBeVisible();
+  await expect(page.getByText(/当前只是读取到编辑框，还没有入库/).first()).toBeVisible();
   await page.getByRole("button", { name: "保存并生成候选题", exact: true }).click();
   await expect(page.getByText("将发送哪些内容")).toBeVisible();
   await expect(page.getByText("本地 mock")).toBeVisible();
@@ -158,6 +186,35 @@ test("MetaLearn OS saves a selected material file and opens candidate generation
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
+test("MetaLearn OS keeps the material and exposes manual fallback when candidate generation fails", async ({ page }) => {
+  await page.route("**/api/ai/cards", async (route) => {
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "Mock AI provider failed." })
+    });
+  });
+  const text = [
+    "AI failure fixture.",
+    "The material should still be saved locally when candidate generation fails.",
+    "The user should see a direct manual-card fallback instead of a silent empty candidate review bench.",
+    "This verifies that failure is recoverable without calling the provider again."
+  ].join(" ");
+
+  await page.goto("/library");
+  await page.getByLabel("学习材料文件").setInputFiles({
+    name: "candidate-failure.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from(text)
+  });
+  await page.getByRole("button", { name: "保存并生成候选题", exact: true }).click();
+  await expect(page.getByText("将发送哪些内容")).toBeVisible();
+  await page.getByRole("button", { name: /确认发送并生成候选题/ }).click();
+  await expect(page.getByText("Mock AI provider failed.").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: /改为手工建卡/ }).first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "candidate-failure" })).toBeVisible();
+});
+
 test("MetaLearn OS creates a review card manually from material evidence", async ({ page }) => {
   let aiCardCalls = 0;
   await page.route("**/api/ai/cards", async (route) => {
@@ -166,7 +223,7 @@ test("MetaLearn OS creates a review card manually from material evidence", async
   });
 
   await page.goto("/library");
-  await page.getByRole("button", { name: "保存到资料库", exact: true }).click();
+  await page.getByRole("button", { name: "仅保存到资料库", exact: true }).click();
   await expect(page.getByText(/已导入并分成/)).toBeVisible();
   const materialLink = page.getByRole("link", { name: "我的学习材料" });
   await expect(materialLink).toBeVisible();
@@ -207,7 +264,7 @@ test("MetaLearn OS creates a review card manually from material evidence", async
 
 test("MetaLearn OS restores a usable workspace from exported JSON", async ({ page }) => {
   await page.goto("/library");
-  await page.getByRole("button", { name: "保存到资料库", exact: true }).click();
+  await page.getByRole("button", { name: "仅保存到资料库", exact: true }).click();
   await expect(page.getByText(/已导入并分成/)).toBeVisible();
   const materialLink = page.getByRole("link", { name: "我的学习材料" });
   await expect(materialLink).toBeVisible();
@@ -251,7 +308,7 @@ test("MetaLearn OS restores a usable workspace from exported JSON", async ({ pag
 
 test("MetaLearn OS creates and resolves high-confidence repair tasks", async ({ page }) => {
   await page.goto("/library");
-  await page.getByRole("button", { name: "保存到资料库", exact: true }).click();
+  await page.getByRole("button", { name: "仅保存到资料库", exact: true }).click();
   await expect(page.getByText(/已导入并分成/)).toBeVisible();
   const materialLink = page.getByRole("link", { name: "我的学习材料" });
   await expect(materialLink).toBeVisible();
@@ -305,7 +362,7 @@ test("MetaLearn OS rejects invalid JSON imports before writing data", async ({ p
   });
 
   await expect(page.getByText("文件不是有效 JSON。", { exact: true })).toBeVisible();
-  await expect(page.getByText("阻断问题")).toBeVisible();
+  await expect(page.getByText("阻断问题 · 1")).toBeVisible();
   await expect(page.getByRole("button", { name: /确认导入/ })).toBeDisabled();
   await expect(page.getByText("导入完成")).not.toBeVisible();
 });
