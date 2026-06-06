@@ -1514,6 +1514,9 @@ function ReviewView({ workspace }: { workspace: Workspace }) {
         />
       )}
       <Panel>
+        <ReviewSessionProgressPanel workspace={workspace} />
+      </Panel>
+      <Panel>
         <h3 className="text-2xl font-semibold tracking-[-0.02em]">队列与错误</h3>
         <div className="mt-4 grid gap-3">
           {queue.length === 0 ? <p className="text-sm text-zinc-500">{hasScope ? "当前筛选下没有队列卡片。" : "当前没有队列卡片。"}</p> : null}
@@ -1528,6 +1531,77 @@ function ReviewView({ workspace }: { workspace: Workspace }) {
         </div>
       </Panel>
     </section>
+  );
+}
+
+function ReviewSessionProgressPanel({ workspace }: { workspace: Workspace }) {
+  const summary = workspace.derived.reviewSessionSummary;
+  const outcomeItems = [
+    { key: "again", label: "错", value: summary.outcomeCounts.again, tone: "bg-rose-500" },
+    { key: "partial", label: "部分对", value: summary.outcomeCounts.partial, tone: "bg-amber-500" },
+    { key: "correct", label: "对", value: summary.outcomeCounts.correct, tone: "bg-emerald-500" },
+    { key: "easy", label: "轻松", value: summary.outcomeCounts.easy, tone: "bg-teal-500" }
+  ];
+  const evidenceTotal = Math.max(1, summary.todayReviewCount);
+  return (
+    <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between xl:flex-col">
+        <div>
+          <h3 className="text-2xl font-semibold tracking-[-0.02em]">今日复习进度</h3>
+          <p className="mt-1 text-sm leading-6 text-zinc-600">{summary.statusLabel}</p>
+        </div>
+        <ProgressRing value={summary.progressRatio} label={`今日 ${summary.todayReviewCount}/${summary.targetCount}`} />
+      </div>
+      <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
+        <ReviewSessionMetric label="到期剩余" value={String(summary.dueRemainingCount)} />
+        <ReviewSessionMetric label="正确率" value={summary.todayReviewCount ? `${Math.round(summary.accuracy * 100)}%` : "证据不足"} />
+        <ReviewSessionMetric label="Brier" value={summary.todayReviewCount ? summary.brierScore.toFixed(3) : "证据不足"} />
+        <ReviewSessionMetric label="平均用时" value={summary.averageDurationMs ? formatDuration(summary.averageDurationMs) : "无记录"} />
+      </div>
+      <div className="mt-5">
+        <p className="text-sm font-semibold text-zinc-950">答案分布</p>
+        <div className="mt-3 grid gap-2">
+          {outcomeItems.map((item) => (
+            <ReviewSessionBar key={item.key} label={item.label} value={item.value} total={evidenceTotal} tone={item.tone} />
+          ))}
+        </div>
+      </div>
+      <div className="mt-5 rounded-2xl bg-zinc-50 p-4">
+        <p className="text-sm font-semibold text-zinc-950">提取证据</p>
+        <div className="mt-3 grid gap-2">
+          <ReviewSessionBar label="强证据" value={summary.strongEvidenceCount} total={evidenceTotal} tone="bg-emerald-600" />
+          <ReviewSessionBar label="中证据" value={summary.mediumEvidenceCount} total={evidenceTotal} tone="bg-teal-500" />
+          <ReviewSessionBar label="弱证据" value={summary.weakEvidenceCount} total={evidenceTotal} tone="bg-amber-500" />
+        </div>
+        {summary.highConfidenceErrorCount > 0 ? (
+          <div className="mt-3 rounded-xl bg-rose-50 p-3 text-sm leading-6 text-rose-950">
+            高信心错误 {summary.highConfidenceErrorCount} 个。完成本轮后进入修复任务处理，不把“已复习”误当成“已掌握”。
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ReviewSessionMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-2xl bg-zinc-50 p-3">
+      <p className="text-xs font-semibold text-zinc-500">{label}</p>
+      <p className="mt-1 break-words font-mono text-lg font-semibold tabular-nums text-zinc-950">{value}</p>
+    </div>
+  );
+}
+
+function ReviewSessionBar({ label, value, total, tone }: { label: string; value: number; total: number; tone: string }) {
+  const ratio = total <= 0 ? 0 : Math.min(1, value / total);
+  return (
+    <div className="grid grid-cols-[64px_1fr_28px] items-center gap-2 text-xs text-zinc-600">
+      <span className="font-medium">{label}</span>
+      <span className="h-2 overflow-hidden rounded-full bg-zinc-200">
+        <span className={`block h-full rounded-full ${tone}`} style={{ width: `${Math.round(ratio * 100)}%` }} />
+      </span>
+      <span className="text-right font-mono font-semibold tabular-nums text-zinc-900">{value}</span>
+    </div>
   );
 }
 
@@ -2684,6 +2758,14 @@ function formatDate(value?: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "暂无";
   return date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+}
+
+function formatDuration(ms: number): string {
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return remainingSeconds ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
 }
 
 function importKindLabel(kind: ImportPreview["kind"]): string {

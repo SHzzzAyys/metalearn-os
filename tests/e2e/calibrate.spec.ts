@@ -60,6 +60,9 @@ test("MetaLearn OS completes the unified learning loop", async ({ page }) => {
   await page.getByRole("button", { name: "错 A", exact: true }).click();
   await expect(page.getByText(/校准差距/)).toBeVisible();
   await expect(page.getByText(/信心 非常确定/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "今日复习进度" })).toBeVisible();
+  await expect(page.getByText("今日 1/5")).toBeVisible();
+  await expect(page.getByText(/高信心错误 1 个/)).toBeVisible();
 
   await page.goto("/explain");
   await expect(page.getByRole("heading", { name: "费曼解释" })).toBeVisible();

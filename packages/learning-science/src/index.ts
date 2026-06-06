@@ -268,6 +268,42 @@ export function buildReviewQueue(cards: Card[], sources: SourceDocument[] = [], 
     });
 }
 
+export function buildReviewSessionSummary(input: { logs: ReviewLog[]; dueCards: Card[]; now: Date; targetCount?: number }) {
+  const todayLogs = input.logs.filter((log) => isSameLocalDate(new Date(log.createdAt), input.now));
+  const targetCount = input.targetCount ?? Math.max(5, Math.min(20, todayLogs.length + input.dueCards.length));
+  const correctCount = todayLogs.filter((log) => log.isCorrect).length;
+  const highConfidenceErrorCount = todayLogs.filter((log) => log.confidence >= 4 && !log.isCorrect).length;
+  const strongEvidenceCount = todayLogs.filter((log) => log.evidenceStrength === "strong").length;
+  const weakEvidenceCount = todayLogs.filter((log) => log.evidenceStrength === "weak" || log.sourceVisibleBeforeAnswer).length;
+  const mediumEvidenceCount = Math.max(0, todayLogs.length - strongEvidenceCount - weakEvidenceCount);
+  const totalDurationMs = todayLogs.reduce((sum, log) => sum + log.durationMs, 0);
+  const averageDurationMs = todayLogs.length === 0 ? 0 : Math.round(totalDurationMs / todayLogs.length);
+  const accuracy = todayLogs.length === 0 ? 0 : round(correctCount / todayLogs.length);
+  const progressRatio = targetCount === 0 ? 0 : round(Math.min(1, todayLogs.length / targetCount));
+  const outcomeCounts: Record<ReviewOutcome, number> = {
+    again: todayLogs.filter((log) => log.outcome === "again").length,
+    partial: todayLogs.filter((log) => log.outcome === "partial").length,
+    correct: todayLogs.filter((log) => log.outcome === "correct").length,
+    easy: todayLogs.filter((log) => log.outcome === "easy").length
+  };
+  return {
+    todayReviewCount: todayLogs.length,
+    targetCount,
+    progressRatio,
+    dueRemainingCount: input.dueCards.length,
+    correctCount,
+    accuracy,
+    brierScore: calculateBrierScore(todayLogs),
+    highConfidenceErrorCount,
+    strongEvidenceCount,
+    mediumEvidenceCount,
+    weakEvidenceCount,
+    averageDurationMs,
+    outcomeCounts,
+    statusLabel: buildReviewSessionStatusLabel(todayLogs.length, targetCount, input.dueCards.length, highConfidenceErrorCount)
+  };
+}
+
 export function calculateActiveLearningRatio(logs: ReviewLog[], sessions: LearningSession[], explanations: ExplanationAttempt[]): number {
   const activeMinutes = logs.length * 1.5 + explanations.length * 4;
   const sessionMinutes = sessions.reduce((sum, session) => sum + (session.actualMinutes ?? session.predictedMinutes), 0);
@@ -457,6 +493,19 @@ function clamp(value: number, min: number, max: number): number {
 
 function round(value: number): number {
   return Math.round(value * 1000) / 1000;
+}
+
+function isSameLocalDate(left: Date, right: Date): boolean {
+  return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth() && left.getDate() === right.getDate();
+}
+
+function buildReviewSessionStatusLabel(todayCount: number, targetCount: number, dueRemaining: number, highConfidenceErrors: number): string {
+  if (todayCount === 0 && dueRemaining > 0) return "还未开始今日复习。";
+  if (todayCount === 0) return "今天还没有复习记录。";
+  if (highConfidenceErrors > 0) return "今天出现高信心错误，复习后优先修复。";
+  if (dueRemaining === 0) return "到期队列已清空，可以转向解释或材料补卡。";
+  if (todayCount >= targetCount) return "已达到今日复习目标，继续处理剩余到期卡。";
+  return "继续完成今日复习目标。";
 }
 
 function scoreAverage(scores: ExplanationAttempt["rubricScores"]): number {

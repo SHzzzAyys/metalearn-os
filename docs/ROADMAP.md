@@ -191,13 +191,14 @@ Implemented:
 - text-change signals for newly added mechanism, example, boundary, contrast, or counterexample language;
 - deterministic insight action cards on `/insights` that link back to review, mistake repair, candidate approval, explanation revision, or active material reading;
 - calibration evidence thresholds that label insufficient review data before showing trend or reliability conclusions;
+- today's review progress panel with target progress, due remaining, answer distribution, evidence strength, and high-confidence error warnings;
 - Brier trend by review date and confidence reliability buckets on `/insights`;
 - scoped material, tag, and concept insight drilldowns with evidence status and action links;
 - scoped query handling for library tag filters, review tag/material filters, high-confidence repair filters, and Feynman concept prefill;
 - home study views that turn scoped evidence into one-click repair, review, candidate, material, tag, or concept entries;
 - user-pinned study views stored locally and included in JSON backup/restore packages;
 - Settings management for pinned study views, including local title/detail edits, priority tuning, and last-opened tracking;
-- unit coverage for explanation threads, insight action priority, calibration trend, reliability bucket status, evidence thresholds, scoped insight derivation, and study view priority.
+- unit coverage for explanation threads, insight action priority, calibration trend, review session summary, reliability bucket status, evidence thresholds, scoped insight derivation, and study view priority.
 
 Planned work:
 

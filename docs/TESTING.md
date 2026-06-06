@@ -52,6 +52,7 @@ High-value unit tests should cover:
 - explanation version thread deltas for rubric changes, resolved/new gap tags, and text-change signals;
 - insight action priority for repair, review, candidate approval, explanation revision, material reading, and insufficient evidence;
 - calibration trend grouping by review date;
+- today's review session summary: target progress, due remaining, answer distribution, evidence strength, high-confidence errors, and stale-log exclusion;
 - confidence reliability bucket status: `empty`, `thin`, and `enough`;
 - insight evidence thresholds that prevent thin review data from being treated as stable conclusions;
 - scoped material, tag, and concept insight derivation with evidence status and action links;
@@ -96,6 +97,7 @@ Desktop and mobile should cover:
 - candidate generation and approval;
 - AI failure shows a concrete error and manual-card fallback;
 - review with confidence prediction;
+- today's review progress panel updates after a completed review and flags high-confidence errors;
 - strict review state machine and keyboard shortcuts;
 - home study mode launcher and global command palette navigation;
 - home study views for scoped repair/review/candidate/material/tag/concept continuation;

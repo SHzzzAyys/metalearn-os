@@ -23,6 +23,7 @@ import {
   buildDailyPlan,
   buildCalibrationBuckets,
   buildReviewQueue,
+  buildReviewSessionSummary,
   calculateBrierScore,
   calculateHighConfidenceErrorRate,
   calculateMetacognitiveOverhead,
@@ -94,6 +95,7 @@ export function deriveWorkspace(input: { state: WorkspaceState; now: Date; nowMs
   const dueCards = state.cards.filter((card) => new Date(card.dueAt).getTime() <= nowMs);
   const activeCard = dueCards[0] ?? state.cards[0];
   const reviewQueue = buildReviewQueue(state.cards, state.sources, now, state.chunks);
+  const reviewSessionSummary = buildReviewSessionSummary({ logs: state.logs, dueCards, now });
   const dailyPlan = buildDailyPlan({
     cards: state.cards,
     candidates: state.candidates,
@@ -148,6 +150,7 @@ export function deriveWorkspace(input: { state: WorkspaceState; now: Date; nowMs
     dueCards,
     activeCard,
     reviewQueue,
+    reviewSessionSummary,
     dailyPlan,
     insight,
     highConfidenceErrors,

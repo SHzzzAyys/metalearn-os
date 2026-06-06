@@ -55,6 +55,7 @@ Implemented:
 - review flow with hidden source, confidence 1-5, active answer, self-rating, source reveal, and calibration feedback;
 - strict review state machine that prevents skipping confidence prediction or active answer entry;
 - review keyboard shortcuts: `1-5` for confidence, `A/P/C/E` for wrong, partial, correct, easy, and `N` for next card after feedback;
+- today's review progress panel with due remaining, answer distribution, Brier score, accuracy, evidence strength, and high-confidence error count;
 - global command palette with `Ctrl/Cmd+K` for navigation, review, repair, import, export, and privacy actions;
 - home study mode launcher for import, calibration review, mistake repair, Feynman explanation, and planning;
 - high-confidence error repair tasks at `/review/mistakes`;

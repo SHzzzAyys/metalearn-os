@@ -40,6 +40,7 @@ Insight and AI boundary:
 Derived insight evidence:
 
 - `calibrationTrend`: date-level Brier score, review count, high-confidence error rate, accuracy, and average confidence.
+- `reviewSessionSummary`: today's review count, target progress, due remaining, answer distribution, Brier score, accuracy, high-confidence errors, average duration, and evidence-strength counts. It is derived from `reviewLogs` and current due cards; it is not stored as a separate table.
 - `reliabilityEvidence`: five confidence buckets with expected correctness, actual correctness, sample count, gap, and `empty | thin | enough` status.
 - `insightEvidenceThresholds`: local evidence gates for trend and reliability readability. These are derived from review logs and are not stored in IndexedDB.
 - `scopedInsights`: derived material, tag, and concept groups. Each item carries an evidence status, a metric label, detail chips, and an action link back to the relevant workspace.

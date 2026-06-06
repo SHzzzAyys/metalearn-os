@@ -4,6 +4,7 @@ import {
   buildCalibrationBuckets,
   buildDailyPlan,
   buildReviewQueue,
+  buildReviewSessionSummary,
   calculateBrierScore,
   calculateHighConfidenceErrorRate,
   calculateMetacognitiveOverhead,
@@ -115,6 +116,56 @@ describe("learning science calculations", () => {
     expect(queue[0].source?.id).toBe("source_1");
     expect(queue[0].chunk?.id).toBe("chunk_1");
     expect(queue[1].urgency).toBe("soon");
+  });
+
+  it("summarizes today's review session without mixing older logs", () => {
+    const summary = buildReviewSessionSummary({
+      logs: [
+        {
+          ...logs[0],
+          id: "today_again",
+          confidence: 5,
+          confidenceProbability: 0.9,
+          outcome: "again",
+          isCorrect: false,
+          evidenceStrength: "weak",
+          sourceVisibleBeforeAnswer: true,
+          durationMs: 30_000,
+          createdAt: "2026-06-06T08:00:00.000Z"
+        },
+        {
+          ...logs[1],
+          id: "today_easy",
+          confidence: 4,
+          confidenceProbability: 0.7,
+          outcome: "easy",
+          isCorrect: true,
+          evidenceStrength: "strong",
+          durationMs: 90_000,
+          createdAt: "2026-06-06T08:05:00.000Z"
+        },
+        {
+          ...logs[1],
+          id: "yesterday_correct",
+          createdAt: "2026-06-05T08:05:00.000Z"
+        }
+      ],
+      dueCards: [card],
+      now: new Date("2026-06-06T12:00:00.000Z"),
+      targetCount: 4
+    });
+
+    expect(summary.todayReviewCount).toBe(2);
+    expect(summary.progressRatio).toBe(0.5);
+    expect(summary.dueRemainingCount).toBe(1);
+    expect(summary.accuracy).toBe(0.5);
+    expect(summary.highConfidenceErrorCount).toBe(1);
+    expect(summary.weakEvidenceCount).toBe(1);
+    expect(summary.strongEvidenceCount).toBe(1);
+    expect(summary.outcomeCounts.again).toBe(1);
+    expect(summary.outcomeCounts.easy).toBe(1);
+    expect(summary.averageDurationMs).toBe(60_000);
+    expect(summary.statusLabel).toContain("高信心错误");
   });
 
   it("distinguishes strong extraction from weak source-visible review evidence", () => {
