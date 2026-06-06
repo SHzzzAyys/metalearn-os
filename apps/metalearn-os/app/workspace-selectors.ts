@@ -143,6 +143,36 @@ export function deriveWorkspace(input: { state: WorkspaceState; now: Date; nowMs
 
 export type WorkspaceDerived = ReturnType<typeof deriveWorkspace>;
 
+export type ChunkEvidenceStatus = "uncovered" | "candidate" | "carded" | "reviewed";
+
+export interface ChunkEvidenceSummary {
+  chunkId: string;
+  candidateCount: number;
+  approvedCardCount: number;
+  reviewCount: number;
+  status: ChunkEvidenceStatus;
+}
+
+export interface ActiveReadingStep {
+  chunk: SourceChunk;
+  evidence: ChunkEvidenceSummary;
+  priority: "create" | "review_candidate" | "review_card" | "verify";
+  actionLabel: string;
+  rationale: string;
+  prompts: string[];
+}
+
+export interface ActiveReadingTrack {
+  totalChunks: number;
+  coveredCount: number;
+  coverageRatio: number;
+  uncoveredCount: number;
+  candidateOnlyCount: number;
+  cardedNotReviewedCount: number;
+  reviewedCount: number;
+  nextStep?: ActiveReadingStep;
+}
+
 export function deriveMaterialDetail(state: WorkspaceState, sourceId: string) {
   const source = state.sources.find((item) => item.id === sourceId);
   const chunks = state.chunks.filter((chunk) => chunk.sourceId === sourceId).sort((left, right) => left.index - right.index);
@@ -189,6 +219,120 @@ export function deriveMaterialDetail(state: WorkspaceState, sourceId: string) {
       explanations: explanations.length
     }
   };
+}
+
+export function deriveChunkEvidenceSummaries(chunks: SourceChunk[], candidates: CardCandidate[], cards: Card[], logs: ReviewLog[]) {
+  const summaries = new Map<string, ChunkEvidenceSummary>();
+  const cardsById = new Map(cards.map((card) => [card.id, card]));
+  for (const chunk of chunks) {
+    summaries.set(chunk.id, {
+      chunkId: chunk.id,
+      candidateCount: 0,
+      approvedCardCount: 0,
+      reviewCount: 0,
+      status: "uncovered"
+    });
+  }
+  for (const candidate of candidates) {
+    const summary = summaries.get(candidate.sourceChunkId);
+    if (summary) summary.candidateCount += 1;
+  }
+  for (const card of cards) {
+    const summary = summaries.get(card.sourceChunkId);
+    if (summary) summary.approvedCardCount += 1;
+  }
+  for (const log of logs) {
+    const card = cardsById.get(log.cardId);
+    const summary = card ? summaries.get(card.sourceChunkId) : undefined;
+    if (summary) summary.reviewCount += 1;
+  }
+  for (const summary of summaries.values()) {
+    summary.status = summary.reviewCount > 0 ? "reviewed" : summary.approvedCardCount > 0 ? "carded" : summary.candidateCount > 0 ? "candidate" : "uncovered";
+  }
+  return summaries;
+}
+
+export function deriveActiveReadingTrack(chunks: SourceChunk[], evidenceByChunkId: Map<string, ChunkEvidenceSummary>): ActiveReadingTrack {
+  const summaries = chunks.map((chunk) => evidenceByChunkId.get(chunk.id) ?? {
+    chunkId: chunk.id,
+    candidateCount: 0,
+    approvedCardCount: 0,
+    reviewCount: 0,
+    status: "uncovered" as const
+  });
+  const uncoveredCount = summaries.filter((summary) => summary.status === "uncovered").length;
+  const candidateOnlyCount = summaries.filter((summary) => summary.status === "candidate").length;
+  const cardedNotReviewedCount = summaries.filter((summary) => summary.status === "carded").length;
+  const reviewedCount = summaries.filter((summary) => summary.status === "reviewed").length;
+  const coveredCount = chunks.length - uncoveredCount;
+  const nextStepChunk =
+    chunks.find((chunk) => evidenceByChunkId.get(chunk.id)?.status === "uncovered") ??
+    chunks.find((chunk) => evidenceByChunkId.get(chunk.id)?.status === "candidate") ??
+    chunks.find((chunk) => evidenceByChunkId.get(chunk.id)?.status === "carded") ??
+    chunks.find((chunk) => evidenceByChunkId.get(chunk.id)?.status === "reviewed");
+  const nextEvidence = nextStepChunk ? evidenceByChunkId.get(nextStepChunk.id) : undefined;
+
+  return {
+    totalChunks: chunks.length,
+    coveredCount,
+    coverageRatio: chunks.length === 0 ? 0 : coveredCount / chunks.length,
+    uncoveredCount,
+    candidateOnlyCount,
+    cardedNotReviewedCount,
+    reviewedCount,
+    nextStep: nextStepChunk && nextEvidence ? buildActiveReadingStep(nextStepChunk, nextEvidence) : undefined
+  };
+}
+
+function buildActiveReadingStep(chunk: SourceChunk, evidence: ChunkEvidenceSummary): ActiveReadingStep {
+  if (evidence.status === "uncovered") {
+    return {
+      chunk,
+      evidence,
+      priority: "create",
+      actionLabel: "先补一条证据",
+      rationale: "这个片段还没有候选题、卡片或复习记录。先解释或建卡，避免只读不提取。",
+      prompts: buildChunkRecallPrompts(chunk)
+    };
+  }
+  if (evidence.status === "candidate") {
+    return {
+      chunk,
+      evidence,
+      priority: "review_candidate",
+      actionLabel: "审核候选题",
+      rationale: "这个片段已经有候选题，但还没有进入复习队列。下一步应人工审核，而不是继续生成。",
+      prompts: buildChunkRecallPrompts(chunk)
+    };
+  }
+  if (evidence.status === "carded") {
+    return {
+      chunk,
+      evidence,
+      priority: "review_card",
+      actionLabel: "完成一次校准复习",
+      rationale: "这个片段已经成卡，但还缺少真实提取证据。下一步应去复习并记录信心。",
+      prompts: buildChunkRecallPrompts(chunk)
+    };
+  }
+  return {
+    chunk,
+    evidence,
+    priority: "verify",
+    actionLabel: "检查复习证据",
+    rationale: "这个片段已有复习记录。可以查看校准表现，或继续处理未覆盖片段。",
+    prompts: buildChunkRecallPrompts(chunk)
+  };
+}
+
+export function buildChunkRecallPrompts(chunk: SourceChunk): string[] {
+  const normalized = chunk.text.replace(/\s+/g, " ").trim();
+  const firstSentence = normalized.split(/[。.!?？]/).find((part) => part.trim().length >= 8)?.trim() ?? normalized.slice(0, 80);
+  return [
+    `不看原文，用一句话说明这段主要解决什么问题。`,
+    `围绕“${firstSentence.slice(0, 42)}”提出一个为什么或如何问题。`,
+    "写出一个边界条件、反例或容易混淆的概念。"
+  ];
 }
 
 export function resolveSourceForCard(card: Card | undefined, chunks: SourceChunk[], sources: SourceDocument[]) {

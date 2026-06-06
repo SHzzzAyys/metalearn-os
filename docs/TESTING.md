@@ -42,6 +42,7 @@ High-value unit tests should cover:
 - high-confidence repair task creation and resolution;
 - review queue ordering;
 - source traceability through chunks;
+- chunk evidence summaries and active reading-track priority;
 - material text quality analysis for short text, scanned-PDF risk, whitespace-heavy text, and garbled extraction;
 - candidate generation diagnostics for unsaved text, saved sources without chunks, pending previews, failed previews, and existing candidates;
 - tag overconfidence;
@@ -62,6 +63,7 @@ Important integration paths:
 - import material -> chunk -> preview -> candidates;
 - file selection -> text preview -> save and generate -> upload preview -> candidate review bench;
 - material detail -> reader workbench -> focused chunk -> manual card or Feynman explanation handoff;
+- material detail -> active reading track -> recommended chunk -> manual card, candidate review, review, or evidence panel;
 - failed AI candidate generation -> saved material remains available -> manual card creation;
 - edit candidate -> approve -> review queue;
 - high-confidence error -> mistake reason -> explanation repair;
@@ -86,6 +88,7 @@ Desktop and mobile should cover:
 - strict review state machine and keyboard shortcuts;
 - home study mode launcher and global command palette navigation;
 - material reader workbench, evidence coverage map, and source-to-Feynman handoff;
+- active reading track, recommended chunk, and read-after-recall prompts;
 - high-confidence error repair task visibility;
 - Feynman questions and explanation save;
 - insight and privacy copy;
@@ -107,6 +110,7 @@ Recommended visual targets:
 - settings mobile.
 - library import preview, success report, and failure state.
 - library material import stages, text-quality warnings, candidate-generation diagnostic, and candidate review highlight.
+- material detail active reading track, coverage map, focused chunk prompts, and no mobile horizontal overflow.
 
 Recommended accessibility checks:
 

@@ -153,6 +153,30 @@ Design principles:
 - make weak/uncovered source areas visible so users know where to act next;
 - keep every AI-adjacent action reviewable and reversible.
 
+## v0.3.4 - Active Reading Track
+
+Status: implemented patch.
+
+Goal: make material reading behave like a guided active-learning workflow, not a passive document viewer.
+
+Included:
+
+- deterministic active reading track on `/library/[sourceId]`;
+- source chunk prioritization by evidence state: uncovered, candidate-only, carded-not-reviewed, reviewed;
+- next-step recommendation for the highest-priority chunk;
+- per-chunk recall prompts that ask the learner to explain, question, and identify boundaries before relying on AI;
+- quick actions from the recommended chunk into manual card creation, Feynman explanation, candidate review, calibration review, or review evidence;
+- previous/next chunk navigation in the focused reader;
+- unit coverage for reading-track priority and prompt derivation;
+- E2E coverage for reader visibility and source-to-explanation flow.
+
+Design principles:
+
+- treat reading as preparation for retrieval, explanation, and correction;
+- do not mark a chunk as learned merely because it was viewed;
+- keep the reading track derived from local evidence instead of adding hidden progress state;
+- use AI-product references only for interaction inspiration, not for unsupported learning claims.
+
 ## v0.4.0 - Explanation Versions and Insight Quality
 
 Goal: make Feynman explanations and insights evidence-driven.

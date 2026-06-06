@@ -39,7 +39,6 @@ import type {
   MistakeReason,
   ProductArea,
   RepairTask,
-  ReviewLog,
   ReviewOutcome,
   SourceChunk,
   SourceDocument,
@@ -72,7 +71,15 @@ import {
 } from "@metalearn/ui";
 import { useMetaLearnWorkspace } from "./use-metalearn-workspace";
 import type { CandidateGenerationDiagnostic, MaterialImportDraft, MaterialTextQuality } from "./material-import-state";
-import { deriveMaterialDetail, viewMeta } from "./workspace-selectors";
+import {
+  buildChunkRecallPrompts,
+  deriveActiveReadingTrack,
+  deriveChunkEvidenceSummaries,
+  deriveMaterialDetail,
+  viewMeta,
+  type ActiveReadingTrack,
+  type ChunkEvidenceSummary
+} from "./workspace-selectors";
 
 type Workspace = ReturnType<typeof useMetaLearnWorkspace>;
 
@@ -84,14 +91,6 @@ interface QuickCommand {
   shortcut?: string;
   disabled?: boolean;
   run: () => void | Promise<unknown>;
-}
-
-interface ChunkEvidenceSummary {
-  chunkId: string;
-  candidateCount: number;
-  approvedCardCount: number;
-  reviewCount: number;
-  status: "uncovered" | "candidate" | "carded" | "reviewed";
 }
 
 export function MetaLearnOSPage({ view, sourceId, reviewMode = "main" }: { view: ProductArea; sourceId?: string; reviewMode?: "main" | "mistakes" }) {
@@ -736,6 +735,7 @@ function MaterialReaderWorkbench({
   filteredChunks,
   focusedChunk,
   chunkEvidence,
+  activeReadingTrack,
   readerQuery,
   onReaderQueryChange,
   onFocusChunk,
@@ -747,6 +747,7 @@ function MaterialReaderWorkbench({
   filteredChunks: SourceChunk[];
   focusedChunk?: SourceChunk;
   chunkEvidence: Map<string, ChunkEvidenceSummary>;
+  activeReadingTrack: ActiveReadingTrack;
   readerQuery: string;
   onReaderQueryChange: (value: string) => void;
   onFocusChunk: (chunkId: string) => void;
@@ -757,6 +758,9 @@ function MaterialReaderWorkbench({
   const totalCards = chunks.reduce((sum, chunk) => sum + (chunkEvidence.get(chunk.id)?.approvedCardCount ?? 0), 0);
   const totalReviews = chunks.reduce((sum, chunk) => sum + (chunkEvidence.get(chunk.id)?.reviewCount ?? 0), 0);
   const totalCandidates = chunks.reduce((sum, chunk) => sum + (chunkEvidence.get(chunk.id)?.candidateCount ?? 0), 0);
+  const focusedIndex = focusedChunk ? chunks.findIndex((chunk) => chunk.id === focusedChunk.id) : -1;
+  const previousChunk = focusedIndex > 0 ? chunks[focusedIndex - 1] : undefined;
+  const nextChunk = focusedIndex >= 0 && focusedIndex < chunks.length - 1 ? chunks[focusedIndex + 1] : undefined;
 
   return (
     <Panel>
@@ -769,6 +773,14 @@ function MaterialReaderWorkbench({
           <MaterialStat label="复习证据" value={totalReviews} />
         </div>
       </div>
+
+      <ActiveReadingTrackPanel
+        track={activeReadingTrack}
+        source={source}
+        archived={archived}
+        workspace={workspace}
+        onFocusChunk={onFocusChunk}
+      />
 
       <div className="mt-5 rounded-2xl bg-zinc-50 p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -808,7 +820,21 @@ function MaterialReaderWorkbench({
                 <Badge>{chunkStatusLabel(chunkEvidence.get(focusedChunk.id)?.status ?? "uncovered")}</Badge>
               </div>
               <p className="mt-4 whitespace-pre-wrap break-words text-base leading-8 text-zinc-900">{focusedChunk.text}</p>
+              <div className="mt-4 rounded-2xl bg-white/80 p-4">
+                <p className="text-sm font-semibold text-zinc-950">读后立即自测</p>
+                <div className="mt-3 grid gap-2">
+                  {buildChunkRecallPrompts(focusedChunk).map((prompt) => (
+                    <p key={prompt} className="rounded-xl bg-zinc-50 px-3 py-2 text-sm leading-6 text-zinc-700">{prompt}</p>
+                  ))}
+                </div>
+              </div>
               <div className="mt-5 flex flex-wrap gap-2">
+                <SecondaryButton disabled={!previousChunk} onClick={() => previousChunk ? onFocusChunk(previousChunk.id) : undefined}>
+                  上一段
+                </SecondaryButton>
+                <SecondaryButton disabled={!nextChunk} onClick={() => nextChunk ? onFocusChunk(nextChunk.id) : undefined}>
+                  下一段
+                </SecondaryButton>
                 <Button disabled={archived} onClick={() => void workspace.startManualCard(source.id, focusedChunk.id)}>
                   <FileText size={16} /> 用当前片段建卡
                 </Button>
@@ -847,6 +873,77 @@ function MaterialReaderWorkbench({
         </div>
       </div>
     </Panel>
+  );
+}
+
+function ActiveReadingTrackPanel({
+  track,
+  source,
+  archived,
+  workspace,
+  onFocusChunk
+}: {
+  track: ActiveReadingTrack;
+  source: SourceDocument;
+  archived: boolean;
+  workspace: Workspace;
+  onFocusChunk: (chunkId: string) => void;
+}) {
+  const step = track.nextStep;
+  return (
+    <div className="mt-5 rounded-[1.25rem] border border-emerald-100 bg-white/80 p-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-zinc-950">主动阅读轨</p>
+          <p className="mt-1 max-w-[72ch] text-sm leading-6 text-zinc-600">
+            按证据缺口排序处理材料：未覆盖片段先补提取证据，已有候选题先审核，已有卡片先复习。
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:min-w-[460px]">
+          <MaterialStat label="未覆盖" value={track.uncoveredCount} />
+          <MaterialStat label="待审核" value={track.candidateOnlyCount} />
+          <MaterialStat label="待复习" value={track.cardedNotReviewedCount} />
+          <MaterialStat label="已复习" value={track.reviewedCount} />
+        </div>
+      </div>
+      {step ? (
+        <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+          <div className="min-w-0 rounded-2xl bg-emerald-50/70 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge>{step.actionLabel}</Badge>
+              <Badge>片段 #{step.chunk.index + 1}</Badge>
+              <Badge>{chunkStatusLabel(step.evidence.status)}</Badge>
+            </div>
+            <p className="mt-3 break-words text-sm leading-6 text-emerald-950">{step.rationale}</p>
+            <div className="mt-3 grid gap-2">
+              {step.prompts.map((prompt) => (
+                <p key={prompt} className="rounded-xl bg-white/85 px-3 py-2 text-sm leading-6 text-zinc-700">{prompt}</p>
+              ))}
+            </div>
+          </div>
+          <div className="flex min-w-0 flex-col gap-2">
+            <SecondaryButton onClick={() => onFocusChunk(step.chunk.id)}>
+              查看建议片段
+            </SecondaryButton>
+            {step.priority === "create" ? (
+              <>
+                <Button disabled={archived} onClick={() => void workspace.startManualCard(source.id, step.chunk.id)}>
+                  <FileText size={16} /> 从该片段建卡
+                </Button>
+                <SecondaryButton disabled={archived} onClick={() => openChunkInExplain(source, step.chunk)}>
+                  <HelpCircle size={16} /> 先解释这段
+                </SecondaryButton>
+              </>
+            ) : null}
+            {step.priority === "review_candidate" ? <TextLink href="#material-candidates">审核候选题</TextLink> : null}
+            {step.priority === "review_card" ? <TextLink href="/review">进入校准复习</TextLink> : null}
+            {step.priority === "verify" ? <TextLink href="#material-review-evidence">查看复习证据</TextLink> : null}
+          </div>
+        </div>
+      ) : (
+        <EmptyState title="还没有可阅读片段" detail="导入可复制文本层材料后，这里会生成按证据缺口排序的阅读轨。" />
+      )}
+    </div>
   );
 }
 
@@ -1029,7 +1126,8 @@ function MaterialDetailView({ workspace, sourceId }: { workspace: Workspace; sou
   const [focusedChunkId, setFocusedChunkId] = useState("");
   const detail = deriveMaterialDetail(workspace.state, sourceId);
   const source = detail.source;
-  const chunkEvidence = buildChunkEvidenceSummary(detail.chunks, detail.pendingCandidates, detail.approvedCards, detail.reviewLogs);
+  const chunkEvidence = deriveChunkEvidenceSummaries(detail.chunks, detail.pendingCandidates, detail.approvedCards, detail.reviewLogs);
+  const activeReadingTrack = deriveActiveReadingTrack(detail.chunks, chunkEvidence);
   const filteredChunks = detail.chunks.filter((chunk) => {
     const normalizedQuery = readerQuery.trim().toLowerCase();
     if (!normalizedQuery) return true;
@@ -1110,6 +1208,7 @@ function MaterialDetailView({ workspace, sourceId }: { workspace: Workspace; sou
           filteredChunks={filteredChunks}
           focusedChunk={focusedChunk}
           chunkEvidence={chunkEvidence}
+          activeReadingTrack={activeReadingTrack}
           readerQuery={readerQuery}
           onReaderQueryChange={setReaderQuery}
           onFocusChunk={setFocusedChunkId}
@@ -1119,7 +1218,7 @@ function MaterialDetailView({ workspace, sourceId }: { workspace: Workspace; sou
 
         <Panel>
           <SectionHeader title="候选题审核" detail="这里只显示属于当前材料的候选题。无来源证据时不能批准。" />
-          <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <div id="material-candidates" className="mt-5 grid scroll-mt-24 gap-4 lg:grid-cols-2">
             {detail.pendingCandidates.length === 0 ? <EmptyState title="当前材料没有待审候选题" detail="可以从来源片段手工建卡，也可以先生成 AI 候选题再审核。" /> : null}
             {detail.pendingCandidates.map((candidate) => (
               <CandidateEditor key={candidate.id} candidate={candidate} workspace={workspace} />
@@ -1141,7 +1240,7 @@ function MaterialDetailView({ workspace, sourceId }: { workspace: Workspace; sou
       <aside className="grid gap-5 xl:sticky xl:top-5 xl:self-start">
         <Panel>
           <SectionHeader title="复习证据" detail="数据不足时不生成虚假洞察。" />
-          <div className="mt-5 grid gap-4">
+          <div id="material-review-evidence" className="mt-5 grid scroll-mt-24 gap-4">
             {detail.recentPerformance.reviewCount === 0 ? (
               <EmptyState title="证据不足" detail="完成至少一次复习后，这里才会显示校准指标。" />
             ) : (
@@ -1850,37 +1949,6 @@ function stageLabel(stage: MaterialImportDraft["stage"]): string {
     failed: "流程失败"
   };
   return labels[stage];
-}
-
-function buildChunkEvidenceSummary(chunks: SourceChunk[], candidates: CardCandidate[], cards: Card[], logs: ReviewLog[]) {
-  const summaries = new Map<string, ChunkEvidenceSummary>();
-  const cardsById = new Map(cards.map((card) => [card.id, card]));
-  for (const chunk of chunks) {
-    summaries.set(chunk.id, {
-      chunkId: chunk.id,
-      candidateCount: 0,
-      approvedCardCount: 0,
-      reviewCount: 0,
-      status: "uncovered"
-    });
-  }
-  for (const candidate of candidates) {
-    const summary = summaries.get(candidate.sourceChunkId);
-    if (summary) summary.candidateCount += 1;
-  }
-  for (const card of cards) {
-    const summary = summaries.get(card.sourceChunkId);
-    if (summary) summary.approvedCardCount += 1;
-  }
-  for (const log of logs) {
-    const card = cardsById.get(log.cardId);
-    const summary = card ? summaries.get(card.sourceChunkId) : undefined;
-    if (summary) summary.reviewCount += 1;
-  }
-  for (const summary of summaries.values()) {
-    summary.status = summary.reviewCount > 0 ? "reviewed" : summary.approvedCardCount > 0 ? "carded" : summary.candidateCount > 0 ? "candidate" : "uncovered";
-  }
-  return summaries;
 }
 
 function chunkStatusLabel(status: ChunkEvidenceSummary["status"]) {

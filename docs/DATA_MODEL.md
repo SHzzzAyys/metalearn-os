@@ -47,6 +47,33 @@ SourceChunk.sourceId -> SourceDocument.id
 
 Cards generated from explanations use a source id shaped around the explanation version and must still remain visible to the user as explanation-derived evidence.
 
+## Active Reading Track
+
+The active reading track is derived runtime state, not an IndexedDB table.
+
+It reads:
+
+- `SourceChunk`;
+- `CardCandidate`;
+- `Card`;
+- `ReviewLog`.
+
+Each chunk is classified as:
+
+- `uncovered`: no candidate, approved card, or review evidence;
+- `candidate`: at least one pending candidate, but no approved card;
+- `carded`: at least one approved card, but no review log;
+- `reviewed`: at least one review log through an approved card.
+
+The next reading action is chosen in this order:
+
+1. uncovered chunks should be explained or turned into source-grounded candidate cards;
+2. candidate-only chunks should go to human candidate review;
+3. carded chunks should go to calibration review;
+4. reviewed chunks should show evidence rather than invent more work.
+
+Important boundary: viewing or focusing a chunk is not stored as learning evidence and does not imply mastery. Only candidate creation, card approval, explanation attempts, review logs, and repair tasks count as durable learning evidence.
+
 ## Material Import Runtime State
 
 Material file reading and candidate-generation diagnosis are client runtime state, not IndexedDB schema. This keeps schema `v4` stable while making the import flow observable.

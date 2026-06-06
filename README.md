@@ -47,6 +47,7 @@ Implemented:
 - visible material import stages, text-quality checks, and candidate-generation diagnostics;
 - automatic chunking;
 - material reader workbench with chunk focus, evidence coverage, and source-to-card actions;
+- active reading track that prioritizes uncovered chunks, pending candidates, carded-but-unreviewed chunks, and reviewed evidence;
 - AI upload preview before any generation request;
 - local mock AI provider by default;
 - source-grounded candidate card generation;

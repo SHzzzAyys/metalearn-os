@@ -251,6 +251,9 @@ test("MetaLearn OS creates a review card manually from material evidence", async
 
   await expect(page.getByRole("heading", { name: "我的学习材料" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "阅读工作台" })).toBeVisible();
+  await expect(page.getByText("主动阅读轨", { exact: true })).toBeVisible();
+  await expect(page.getByText("读后立即自测", { exact: true })).toBeVisible();
+  await expect(page.getByText(/不看原文/).first()).toBeVisible();
   await expect(page.getByText("证据覆盖", { exact: true })).toBeVisible();
   await expect(page.getByText("聚焦片段", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "复习证据" })).toBeVisible();
@@ -289,6 +292,9 @@ test("MetaLearn OS opens a Feynman draft from focused source evidence", async ({
   await page.getByRole("link", { name: "我的学习材料" }).click();
 
   await expect(page.getByRole("heading", { name: "阅读工作台" })).toBeVisible();
+  await expect(page.getByText("主动阅读轨", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "查看建议片段" }).click();
+  await expect(page.getByText("读后立即自测", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /用当前片段解释/ }).click();
   await expect(page).toHaveURL(/\/explain/);
   await expect(page.getByRole("heading", { name: "费曼解释" })).toBeVisible();
