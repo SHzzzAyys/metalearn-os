@@ -129,6 +129,7 @@ export function deriveWorkspace(input: { state: WorkspaceState; now: Date; nowMs
   const calibrationTrend = deriveCalibrationTrend(state.logs);
   const reliabilityEvidence = deriveReliabilityEvidence(state.logs);
   const insightEvidenceThresholds = deriveInsightEvidenceThresholds(state.logs, calibrationTrend, reliabilityEvidence);
+  const scopedInsights = deriveScopedInsights(state, explanationThreads);
   const latestPreview = state.aiRequestPreviews[0];
   return {
     pendingCandidates,
@@ -146,6 +147,7 @@ export function deriveWorkspace(input: { state: WorkspaceState; now: Date; nowMs
     calibrationTrend,
     reliabilityEvidence,
     insightEvidenceThresholds,
+    scopedInsights,
     latestPreview,
     repairTaskSummary,
     modules: buildModules(dueCards.length, pendingCandidates.length, repairTaskSummary.openCount),
@@ -256,6 +258,32 @@ export interface InsightEvidenceThresholds {
   message: string;
 }
 
+export type ScopedInsightKind = "material" | "tag" | "concept";
+
+export interface ScopedInsight {
+  id: string;
+  kind: ScopedInsightKind;
+  label: string;
+  status: CalibrationEvidenceStatus;
+  evidenceCount: number;
+  evidenceLabel: string;
+  summary: string;
+  metricLabel: string;
+  detailChips: string[];
+  href: string;
+  actionLabel: string;
+  brierScore?: number;
+  accuracy?: number;
+  overconfidence?: number;
+  highConfidenceErrorCount?: number;
+}
+
+export interface ScopedInsightGroups {
+  materials: ScopedInsight[];
+  tags: ScopedInsight[];
+  concepts: ScopedInsight[];
+}
+
 export function deriveCalibrationTrend(logs: ReviewLog[], maxPoints = 7): CalibrationTrendPoint[] {
   const grouped = new Map<string, ReviewLog[]>();
   for (const log of logs) {
@@ -322,6 +350,124 @@ export function deriveInsightEvidenceThresholds(
     enoughForReliability,
     message
   };
+}
+
+export function deriveScopedInsights(state: WorkspaceState, explanationThreads: ExplanationConceptThread[] = deriveExplanationThreads(state.explanations)): ScopedInsightGroups {
+  const unresolvedTasks = state.repairTasks.filter((task) => task.status === "open" || task.status === "in_progress");
+
+  const materials = state.sources
+    .filter((source) => source.status !== "archived")
+    .map((source): ScopedInsight => {
+      const sourceChunkIds = new Set(state.chunks.filter((chunk) => chunk.sourceId === source.id).map((chunk) => chunk.id));
+      const cards = state.cards.filter((card) => sourceChunkIds.has(card.sourceChunkId));
+      const cardIds = new Set(cards.map((card) => card.id));
+      const logs = state.logs.filter((log) => log.sourceId === source.id || cardIds.has(log.cardId));
+      const candidates = state.candidates.filter((candidate) => sourceChunkIds.has(candidate.sourceChunkId) && candidate.status === "candidate");
+      const tasks = unresolvedTasks.filter((task) => task.sourceId === source.id);
+      const stats = buildScopedReviewStats(logs);
+      const action =
+        tasks.length > 0
+          ? { href: `/review/mistakes?sourceId=${encodeScopedParam(source.id)}`, label: "修复材料错误" }
+          : candidates.length > 0
+            ? { href: `/library/${source.id}#candidate-review`, label: "审核候选题" }
+            : cards.length > 0
+              ? { href: `/review?sourceId=${encodeScopedParam(source.id)}`, label: "复习材料卡" }
+              : { href: `/library/${source.id}`, label: "补来源卡" };
+      return {
+        id: `material-${source.id}`,
+        kind: "material",
+        label: source.title,
+        status: reviewCountToEvidenceStatus(stats.reviewCount),
+        evidenceCount: stats.reviewCount,
+        evidenceLabel: `${stats.reviewCount} 次复习`,
+        summary: buildScopedReviewSummary(stats, "这份材料"),
+        metricLabel: buildScopedMetricLabel(stats),
+        detailChips: [`${sourceChunkIds.size} 片段`, `${cards.length} 卡`, `${candidates.length} 候选`, `${tasks.length} 修复`],
+        href: action.href,
+        actionLabel: action.label,
+        ...stats
+      };
+    })
+    .sort(compareScopedInsights)
+    .slice(0, 4);
+
+  const allTags = new Set<string>();
+  for (const card of state.cards) card.tags.forEach((tag) => allTags.add(tag));
+  for (const candidate of state.candidates) candidate.tags.forEach((tag) => allTags.add(tag));
+  for (const task of unresolvedTasks) task.tagSnapshot.forEach((tag) => allTags.add(tag));
+  const tags = [...allTags]
+    .filter(Boolean)
+    .map((tag): ScopedInsight => {
+      const cards = state.cards.filter((card) => card.tags.includes(tag));
+      const cardIds = new Set(cards.map((card) => card.id));
+      const logs = state.logs.filter((log) => cardIds.has(log.cardId));
+      const candidates = state.candidates.filter((candidate) => candidate.status === "candidate" && candidate.tags.includes(tag));
+      const tasks = unresolvedTasks.filter((task) => task.tagSnapshot.includes(tag));
+      const stats = buildScopedReviewStats(logs);
+      const action =
+        tasks.length > 0
+          ? { href: `/review/mistakes?tag=${encodeScopedParam(tag)}`, label: "修复这个 tag" }
+          : candidates.length > 0
+            ? { href: `/library?tag=${encodeScopedParam(tag)}#candidate-review`, label: "审核 tag 候选" }
+            : cards.length > 0
+              ? { href: `/review?tag=${encodeScopedParam(tag)}`, label: "复习这个 tag" }
+              : { href: `/library?tag=${encodeScopedParam(tag)}`, label: "补 tag 证据" };
+      return {
+        id: `tag-${tag}`,
+        kind: "tag",
+        label: tag,
+        status: reviewCountToEvidenceStatus(stats.reviewCount),
+        evidenceCount: stats.reviewCount,
+        evidenceLabel: `${stats.reviewCount} 次复习`,
+        summary: buildScopedReviewSummary(stats, `tag「${tag}」`),
+        metricLabel: buildScopedMetricLabel(stats),
+        detailChips: [`${cards.length} 卡`, `${candidates.length} 候选`, `${tasks.length} 修复`],
+        href: action.href,
+        actionLabel: action.label,
+        ...stats
+      };
+    })
+    .sort(compareScopedInsights)
+    .slice(0, 5);
+
+  const concepts = explanationThreads
+    .map((thread): ScopedInsight => {
+      const latest = thread.latest;
+      const linkedCardIds = new Set(thread.versions.flatMap((version) => version.attempt.linkedCardIds ?? []));
+      const logs = state.logs.filter((log) => linkedCardIds.has(log.cardId));
+      const stats = buildScopedReviewStats(logs);
+      const versionCount = thread.versions.length;
+      const gapCount = latest.attempt.gapTags?.length ?? 0;
+      const status: CalibrationEvidenceStatus = versionCount >= 2 ? "enough" : "thin";
+      const href = `/explain?concept=${encodeScopedParam(thread.concept)}`;
+      return {
+        id: `concept-${thread.concept}`,
+        kind: "concept",
+        label: thread.concept,
+        status,
+        evidenceCount: versionCount,
+        evidenceLabel: `${versionCount} 个版本`,
+        summary:
+          versionCount < 2
+            ? "只有一个解释版本。先根据追问写 v2，再比较漏洞是否被补上。"
+            : gapCount > 0
+              ? `最新解释仍有 ${gapCount} 类漏洞，适合继续补机制、例子或边界。`
+              : "已有多个解释版本，当前没有显式 gap；仍可用复习卡验证能否主动提取。",
+        metricLabel: `rubric ${latest.averageScore.toFixed(1)} · v${latest.attempt.versionIndex ?? versionCount}`,
+        detailChips: [`${versionCount} 版本`, `${gapCount} gap`, `${linkedCardIds.size} 关联卡`, `${stats.reviewCount} 复习`],
+        href,
+        actionLabel: gapCount > 0 || versionCount < 2 ? "修订解释" : "验证概念",
+        ...stats
+      };
+    })
+    .sort((left, right) => {
+      const statusDiff = evidenceStatusRank(left.status) - evidenceStatusRank(right.status);
+      if (statusDiff !== 0) return statusDiff;
+      return right.evidenceCount - left.evidenceCount;
+    })
+    .slice(0, 4);
+
+  return { materials, tags, concepts };
 }
 
 export function deriveMaterialDetail(state: WorkspaceState, sourceId: string) {
@@ -680,6 +826,58 @@ function roundOne(value: number): number {
 
 function roundThree(value: number): number {
   return Math.round(value * 1000) / 1000;
+}
+
+function buildScopedReviewStats(logs: ReviewLog[]) {
+  const reviewCount = logs.length;
+  const correctCount = logs.filter((log) => log.isCorrect).length;
+  const averageConfidence = reviewCount === 0 ? 0 : logs.reduce((sum, log) => sum + log.confidenceProbability, 0) / reviewCount;
+  const accuracy = reviewCount === 0 ? 0 : correctCount / reviewCount;
+  return {
+    reviewCount,
+    brierScore: calculateBrierScore(logs),
+    accuracy: roundThree(accuracy),
+    overconfidence: roundThree(averageConfidence - accuracy),
+    highConfidenceErrorCount: logs.filter((log) => log.confidence >= 4 && !log.isCorrect).length
+  };
+}
+
+function reviewCountToEvidenceStatus(reviewCount: number): CalibrationEvidenceStatus {
+  if (reviewCount === 0) return "empty";
+  if (reviewCount < 3) return "thin";
+  return "enough";
+}
+
+function evidenceStatusRank(status: CalibrationEvidenceStatus): number {
+  if (status === "enough") return 0;
+  if (status === "thin") return 1;
+  return 2;
+}
+
+function compareScopedInsights(left: ScopedInsight, right: ScopedInsight): number {
+  const leftRisk = (left.highConfidenceErrorCount ?? 0) * 4 + Math.max(0, left.overconfidence ?? 0) * 10;
+  const rightRisk = (right.highConfidenceErrorCount ?? 0) * 4 + Math.max(0, right.overconfidence ?? 0) * 10;
+  if (rightRisk !== leftRisk) return rightRisk - leftRisk;
+  const statusDiff = evidenceStatusRank(left.status) - evidenceStatusRank(right.status);
+  if (statusDiff !== 0) return statusDiff;
+  return right.evidenceCount - left.evidenceCount;
+}
+
+function buildScopedReviewSummary(stats: ReturnType<typeof buildScopedReviewStats>, label: string): string {
+  if (stats.reviewCount === 0) return `${label}还没有复习证据。先从来源片段建卡或审核候选题。`;
+  if (stats.reviewCount < 3) return `${label}只有 ${stats.reviewCount} 次复习，样本偏薄；先继续提取，不做稳定判断。`;
+  if (stats.highConfidenceErrorCount > 0) return `${label}有 ${stats.highConfidenceErrorCount} 次高信心错误，应优先复盘错因。`;
+  if (stats.overconfidence > 0.15) return `${label}平均信心高于实际正确率，下一轮先降低预测并主动提取。`;
+  return `${label}已有可读复习证据，可以继续观察趋势并补弱项。`;
+}
+
+function buildScopedMetricLabel(stats: ReturnType<typeof buildScopedReviewStats>): string {
+  if (stats.reviewCount === 0) return "证据不足";
+  return `Brier ${stats.brierScore.toFixed(3)} · 正确率 ${Math.round(stats.accuracy * 100)}%`;
+}
+
+function encodeScopedParam(value: string): string {
+  return encodeURIComponent(value.trim());
 }
 
 function normalizeLogDate(value: string): string {

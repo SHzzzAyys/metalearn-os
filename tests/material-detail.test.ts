@@ -12,6 +12,7 @@ import {
   deriveInsightActions,
   deriveMaterialDetail,
   deriveReliabilityEvidence,
+  deriveScopedInsights,
   type WorkspaceState
 } from "../apps/metalearn-os/app/workspace-selectors";
 
@@ -267,6 +268,54 @@ describe("calibration insight evidence selectors", () => {
     expect(enoughThresholds.enoughForTrend).toBe(true);
     expect(enoughThresholds.enoughForReliability).toBe(true);
     expect(enoughThresholds.reliabilityEnoughBucketCount).toBe(2);
+  });
+});
+
+describe("scoped insight selectors", () => {
+  it("derives material, tag, and concept drilldowns with evidence status and action links", () => {
+    const repairTask: RepairTask = {
+      id: "repair_1",
+      reviewLogId: "review_a",
+      cardId: "card_a",
+      sourceId: "source_a",
+      sourceChunkId: "chunk_a",
+      status: "open",
+      reason: "not_retrieved",
+      confidence: 5,
+      outcome: "again",
+      tagSnapshot: ["course", "spacing"],
+      createdAt: "2026-06-01T00:00:00.000Z",
+      updatedAt: "2026-06-01T00:00:00.000Z",
+      linkedRemedialCandidateIds: []
+    };
+    const v1: ExplanationAttempt = {
+      id: "explain_1",
+      concept: "spacing",
+      templateId: "course",
+      explanation: "Spacing means reviewing later.",
+      versionIndex: 1,
+      linkedCardIds: ["card_a"],
+      gapTags: ["mechanism"],
+      rubricScores: { clarity: 3, mechanism: 2, example: 2, boundary: 2, contrast: 2 },
+      questions: [],
+      createdAt: "2026-06-01T00:00:00.000Z"
+    };
+    const insights = deriveScopedInsights(workspaceState({ repairTasks: [repairTask], explanations: [v1] }));
+
+    expect(insights.materials[0].label).toBe("Spacing notes");
+    expect(insights.materials[0].status).toBe("thin");
+    expect(insights.materials[0].href).toBe("/review/mistakes?sourceId=source_a");
+    expect(insights.materials[0].summary).toContain("样本偏薄");
+
+    const spacing = insights.tags.find((item) => item.label === "spacing");
+    expect(spacing?.status).toBe("thin");
+    expect(spacing?.href).toBe("/review/mistakes?tag=spacing");
+    expect(spacing?.detailChips).toContain("1 修复");
+
+    expect(insights.concepts[0].label).toBe("spacing");
+    expect(insights.concepts[0].status).toBe("thin");
+    expect(insights.concepts[0].href).toBe("/explain?concept=spacing");
+    expect(insights.concepts[0].summary).toContain("v2");
   });
 });
 

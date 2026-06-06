@@ -92,6 +92,11 @@ interface QuickCommand {
   run: () => void | Promise<unknown>;
 }
 
+function getQueryParam(key: string): string | null {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get(key);
+}
+
 export function MetaLearnOSPage({ view, sourceId, reviewMode = "main" }: { view: ProductArea; sourceId?: string; reviewMode?: "main" | "mistakes" }) {
   const workspace = useMetaLearnWorkspace();
   const [isCommandOpen, setIsCommandOpen] = useState(false);
@@ -121,8 +126,17 @@ export function MetaLearnOSPage({ view, sourceId, reviewMode = "main" }: { view:
 
   useEffect(() => {
     if (view !== "explain") return;
-    const taskId = new URLSearchParams(window.location.search).get("repairTaskId");
+    const params = new URLSearchParams(window.location.search);
+    const taskId = params.get("repairTaskId");
     if (taskId && taskId !== workspace.activeRepairTaskId) void workspace.startRepairExplanation(taskId);
+    const concept = params.get("concept");
+    if (!taskId && concept && concept !== workspace.concept) workspace.setConcept(concept);
+  }, [view, workspace]);
+
+  useEffect(() => {
+    if (view !== "library") return;
+    const tag = new URLSearchParams(window.location.search).get("tag");
+    if (tag && tag !== workspace.searchQuery) workspace.setSearchQuery(tag);
   }, [view, workspace]);
 
   useEffect(() => {
@@ -1357,13 +1371,19 @@ function ReviewStep({ label, active, done }: { label: string; active: boolean; d
 function MistakesView({ workspace }: { workspace: Workspace }) {
   const [statusFilter, setStatusFilter] = useState<RepairTask["status"] | "all">("all");
   const [reasonFilter, setReasonFilter] = useState<MistakeReason | "all">("all");
+  const [tagFilter, setTagFilter] = useState(() => getQueryParam("tag") ?? "all");
+  const [sourceFilter, setSourceFilter] = useState(() => getQueryParam("sourceId") ?? "all");
   const { state, derived } = workspace;
   const cardById = new Map(state.cards.map((card) => [card.id, card]));
   const sourceById = new Map(state.sources.map((source) => [source.id, source]));
   const logById = new Map(state.logs.map((log) => [log.id, log]));
+  const repairTags = [...new Set(state.repairTasks.flatMap((task) => task.tagSnapshot))].sort();
+  const repairSources = state.sources.filter((source) => state.repairTasks.some((task) => task.sourceId === source.id));
   const tasks = state.repairTasks
     .filter((task) => statusFilter === "all" || task.status === statusFilter)
     .filter((task) => reasonFilter === "all" || task.reason === reasonFilter)
+    .filter((task) => tagFilter === "all" || task.tagSnapshot.includes(tagFilter))
+    .filter((task) => sourceFilter === "all" || task.sourceId === sourceFilter)
     .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
 
   return (
@@ -1384,14 +1404,14 @@ function MistakesView({ workspace }: { workspace: Workspace }) {
               <p className="mt-1 text-sm leading-6 text-zinc-600">这些任务来自信心 4-5 但结果为错或部分对的复习记录。</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <select className="rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 text-sm" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as RepairTask["status"] | "all")}>
+              <select aria-label="状态筛选" className="rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 text-sm" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as RepairTask["status"] | "all")}>
                 <option value="open">open</option>
                 <option value="in_progress">in progress</option>
                 <option value="resolved">resolved</option>
                 <option value="dismissed">dismissed</option>
                 <option value="all">all</option>
               </select>
-              <select className="rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 text-sm" value={reasonFilter} onChange={(event) => setReasonFilter(event.target.value as MistakeReason | "all")}>
+              <select aria-label="错因筛选" className="rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 text-sm" value={reasonFilter} onChange={(event) => setReasonFilter(event.target.value as MistakeReason | "all")}>
                 <option value="all">全部错因</option>
                 <option value="unknown">unknown</option>
                 <option value="not_retrieved">not retrieved</option>
@@ -1400,6 +1420,14 @@ function MistakesView({ workspace }: { workspace: Workspace }) {
                 <option value="missed_boundary">missed boundary</option>
                 <option value="bad_card">bad card</option>
                 <option value="source_gap">source gap</option>
+              </select>
+              <select aria-label="tag 筛选" className="rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 text-sm" value={tagFilter} onChange={(event) => setTagFilter(event.target.value)}>
+                <option value="all">全部 tag</option>
+                {repairTags.map((tag) => <option key={tag} value={tag}>{tag}</option>)}
+              </select>
+              <select aria-label="材料筛选" className="rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 text-sm" value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)}>
+                <option value="all">全部材料</option>
+                {repairSources.map((source) => <option key={source.id} value={source.id}>{source.title}</option>)}
               </select>
             </div>
           </div>
@@ -1810,6 +1838,15 @@ function InsightsView({ workspace }: { workspace: Workspace }) {
           {derived.repairTaskSummary.byReason.length === 0 ? <span className="text-sm text-zinc-500">证据不足</span> : null}
           {derived.repairTaskSummary.byReason.map((item) => <div key={item.label} className="rounded-2xl bg-white/70 p-3 text-sm text-zinc-700">{item.label}: {item.count} 个未解决</div>)}
         </div>
+        <div className="mt-6 border-t border-zinc-200 pt-5">
+          <p className="text-sm font-semibold text-zinc-950">证据下钻</p>
+          <p className="mt-1 text-sm leading-6 text-zinc-600">像按 deck、tag 或筛选视图看统计一样，这里只展示可追溯到本地证据的 scope。</p>
+          <div className="mt-4 grid gap-4">
+            <ScopedInsightSection title="材料证据" items={derived.scopedInsights.materials} emptyDetail="还没有材料级复习证据。" />
+            <ScopedInsightSection title="tag 证据" items={derived.scopedInsights.tags} emptyDetail="还没有 tag 级复习证据。" />
+            <ScopedInsightSection title="概念证据" items={derived.scopedInsights.concepts} emptyDetail="还没有解释版本证据。" />
+          </div>
+        </div>
       </Panel>
     </section>
   );
@@ -1895,6 +1932,56 @@ function CalibrationStatusBadge({ status }: { status: Workspace["derived"]["reli
   const label = status === "enough" ? "样本足够" : status === "thin" ? "样本薄弱" : "暂无样本";
   const tone = status === "enough" ? "bg-emerald-50 text-emerald-800" : status === "thin" ? "bg-amber-50 text-amber-800" : "bg-zinc-100 text-zinc-600";
   return <span className={`rounded-full px-2 py-1 font-medium ${tone}`}>{label}</span>;
+}
+
+function ScopedInsightSection({ title, items, emptyDetail }: { title: string; items: Workspace["derived"]["scopedInsights"]["materials"]; emptyDetail: string }) {
+  return (
+    <section className="min-w-0">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-zinc-500">{title}</p>
+        <Badge>{items.length}</Badge>
+      </div>
+      <div className="mt-2 grid gap-2">
+        {items.length === 0 ? <p className="text-sm text-zinc-500">{emptyDetail}</p> : null}
+        {items.map((item) => <ScopedInsightCard key={item.id} item={item} />)}
+      </div>
+    </section>
+  );
+}
+
+function ScopedInsightCard({ item }: { item: Workspace["derived"]["scopedInsights"]["materials"][number] }) {
+  return (
+    <article className="min-w-0 rounded-2xl border border-zinc-200 bg-white/75 p-3 text-sm text-zinc-700">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap gap-2">
+            <ScopedStatusBadge status={item.status} />
+            <Badge>{scopedKindLabel(item.kind)}</Badge>
+            <Badge>{item.evidenceLabel}</Badge>
+          </div>
+          <p className="mt-2 break-words font-semibold text-zinc-950">{item.label}</p>
+          <p className="mt-1 break-words leading-6">{item.summary}</p>
+        </div>
+        <TextLink href={item.href}>{item.actionLabel}</TextLink>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Badge>{item.metricLabel}</Badge>
+        {item.detailChips.map((chip) => <Badge key={chip}>{chip}</Badge>)}
+      </div>
+    </article>
+  );
+}
+
+function ScopedStatusBadge({ status }: { status: Workspace["derived"]["scopedInsights"]["materials"][number]["status"] }) {
+  const label = status === "enough" ? "可读" : status === "thin" ? "样本薄" : "无证据";
+  const tone = status === "enough" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : status === "thin" ? "border-amber-200 bg-amber-50 text-amber-800" : "border-zinc-200 bg-zinc-100 text-zinc-600";
+  return <span className={`rounded-full border px-2 py-1 text-xs font-medium ${tone}`}>{label}</span>;
+}
+
+function scopedKindLabel(kind: Workspace["derived"]["scopedInsights"]["materials"][number]["kind"]): string {
+  if (kind === "material") return "材料";
+  if (kind === "tag") return "tag";
+  return "概念";
 }
 
 function formatPercent(value: number): string {

@@ -32,6 +32,7 @@ function createTextPdfBuffer(text: string) {
 }
 
 test("MetaLearn OS completes the unified learning loop", async ({ page }) => {
+  test.setTimeout(75_000);
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "今天该做什么" })).toBeVisible();
@@ -74,6 +75,10 @@ test("MetaLearn OS completes the unified learning loop", async ({ page }) => {
   await expect(page.getByText("校准证据质量", { exact: true })).toBeVisible();
   await expect(page.getByText("信心可靠性曲线", { exact: true })).toBeVisible();
   await expect(page.getByText("Brier 趋势", { exact: true })).toBeVisible();
+  await expect(page.getByText("证据下钻", { exact: true })).toBeVisible();
+  await expect(page.getByText("材料证据", { exact: true })).toBeVisible();
+  await expect(page.getByText("tag 证据", { exact: true })).toBeVisible();
+  await expect(page.getByText("概念证据", { exact: true })).toBeVisible();
   await expect(page.getByText("下一步行动", { exact: true })).toBeVisible();
 
   await page.goto("/settings");
@@ -378,8 +383,9 @@ test("MetaLearn OS creates and resolves high-confidence repair tasks", async ({ 
   await expect(page.getByText(/创建高信心错误修复任务/)).toBeVisible();
   await expect(page.getByText(/证据强度 weak/)).toBeVisible();
 
-  await page.goto("/review/mistakes");
+  await page.goto("/review/mistakes?tag=course");
   await expect(page.getByRole("heading", { name: "高信心错误", exact: true })).toBeVisible();
+  await expect(page.getByLabel("tag 筛选")).toHaveValue("course");
   await expect(page.getByText("为什么高信心错误特别值得优先复盘？")).toBeVisible();
   await page.getByRole("link", { name: /用费曼复盘/ }).click();
   await expect(page).toHaveURL(/\/explain\?repairTaskId=/);
@@ -400,6 +406,7 @@ test("MetaLearn OS creates and resolves high-confidence repair tasks", async ({ 
   await expect(page.getByText("校准证据质量", { exact: true })).toBeVisible();
   await expect(page.getByText("信心可靠性曲线", { exact: true })).toBeVisible();
   await expect(page.getByText("Brier 趋势", { exact: true })).toBeVisible();
+  await expect(page.getByText("证据下钻", { exact: true })).toBeVisible();
   await expect(page.getByText("下一步行动", { exact: true })).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);

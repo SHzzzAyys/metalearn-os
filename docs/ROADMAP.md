@@ -192,15 +192,16 @@ Implemented:
 - deterministic insight action cards on `/insights` that link back to review, mistake repair, candidate approval, explanation revision, or active material reading;
 - calibration evidence thresholds that label insufficient review data before showing trend or reliability conclusions;
 - Brier trend by review date and confidence reliability buckets on `/insights`;
-- unit coverage for explanation threads, insight action priority, calibration trend, reliability bucket status, and evidence thresholds.
+- scoped material, tag, and concept insight drilldowns with evidence status and action links;
+- scoped query handling for high-confidence repair filters and Feynman concept prefill;
+- unit coverage for explanation threads, insight action priority, calibration trend, reliability bucket status, evidence thresholds, and scoped insight derivation.
 
 Planned work:
 
 - strengthen concept nodes and confirmed concept edges;
 - generate remedial candidates from explanation gap tags;
 - improve tag overconfidence and gap distribution charts;
-- add scoped "not enough evidence" thresholds to tag, material, and concept-level insights;
-- deepen action links with scoped filters for material, tag, and concept.
+- deepen scoped filters on review, library, and explanation workspaces beyond the current high-confidence repair and concept prefill paths.
 
 Acceptance criteria:
 

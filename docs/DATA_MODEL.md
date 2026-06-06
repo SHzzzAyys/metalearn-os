@@ -41,7 +41,15 @@ Derived insight evidence:
 - `calibrationTrend`: date-level Brier score, review count, high-confidence error rate, accuracy, and average confidence.
 - `reliabilityEvidence`: five confidence buckets with expected correctness, actual correctness, sample count, gap, and `empty | thin | enough` status.
 - `insightEvidenceThresholds`: local evidence gates for trend and reliability readability. These are derived from review logs and are not stored in IndexedDB.
+- `scopedInsights`: derived material, tag, and concept groups. Each item carries an evidence status, a metric label, detail chips, and an action link back to the relevant workspace.
 - Thin evidence must be shown as thin evidence. The UI must not present empty or one-sample metrics as stable learning conclusions.
+
+Scoped insights are local selectors, not persisted analytics records:
+
+- material scope resolves `Card.sourceChunkId -> SourceChunk.sourceId -> SourceDocument.id`;
+- tag scope resolves card tags, pending candidate tags, and repair task tag snapshots;
+- concept scope resolves Feynman explanation threads and linked card IDs;
+- action links may include query parameters such as `tag`, `sourceId`, or `concept`, but they do not upload data or invoke AI.
 
 ## Source Traceability
 
