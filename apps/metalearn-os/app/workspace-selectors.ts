@@ -117,6 +117,14 @@ export function deriveWorkspace(input: { state: WorkspaceState; now: Date; nowMs
   }).filter((asset) => `${asset.title} ${asset.detail} ${asset.statusLabel}`.toLowerCase().includes(searchQuery.toLowerCase()));
   const tagOverconfidence = calculateTagOverconfidence(state.cards, state.logs);
   const explanationGapTags = summarizeExplanationGaps(state.explanations);
+  const explanationThreads = deriveExplanationThreads(state.explanations);
+  const insightActions = deriveInsightActions({
+    dueCards,
+    pendingCandidates,
+    repairTaskSummary,
+    explanationThreads,
+    sources: state.sources
+  });
   const latestPreview = state.aiRequestPreviews[0];
   return {
     pendingCandidates,
@@ -129,6 +137,8 @@ export function deriveWorkspace(input: { state: WorkspaceState; now: Date; nowMs
     assets,
     tagOverconfidence,
     explanationGapTags,
+    explanationThreads,
+    insightActions,
     latestPreview,
     repairTaskSummary,
     modules: buildModules(dueCards.length, pendingCandidates.length, repairTaskSummary.openCount),
@@ -171,6 +181,39 @@ export interface ActiveReadingTrack {
   cardedNotReviewedCount: number;
   reviewedCount: number;
   nextStep?: ActiveReadingStep;
+}
+
+export interface ExplanationVersionDelta {
+  attempt: ExplanationAttempt;
+  previous?: ExplanationAttempt;
+  averageScore: number;
+  previousAverageScore?: number;
+  scoreDelta?: number;
+  improvedRubricKeys: string[];
+  declinedRubricKeys: string[];
+  resolvedGapTags: string[];
+  newGapTags: string[];
+  textDelta: {
+    currentLength: number;
+    previousLength?: number;
+    lengthDelta?: number;
+    addedSignals: string[];
+  };
+}
+
+export interface ExplanationConceptThread {
+  concept: string;
+  versions: ExplanationVersionDelta[];
+  latest: ExplanationVersionDelta;
+}
+
+export interface InsightAction {
+  id: string;
+  title: string;
+  detail: string;
+  href: string;
+  priority: "high" | "medium" | "low";
+  evidenceLabel: string;
 }
 
 export function deriveMaterialDetail(state: WorkspaceState, sourceId: string) {
@@ -217,6 +260,62 @@ export function deriveMaterialDetail(state: WorkspaceState, sourceId: string) {
       approvedCards: approvedCards.length,
       reviewLogs: reviewLogs.length,
       explanations: explanations.length
+    }
+  };
+}
+
+export function deriveExplanationThreads(explanations: ExplanationAttempt[]): ExplanationConceptThread[] {
+  const grouped = new Map<string, ExplanationAttempt[]>();
+  for (const attempt of explanations) {
+    const concept = attempt.concept.trim() || "未命名概念";
+    grouped.set(concept, [...(grouped.get(concept) ?? []), attempt]);
+  }
+
+  return [...grouped.entries()]
+    .map(([concept, attempts]) => {
+      const sorted = [...attempts].sort((left, right) => {
+        const versionDiff = (left.versionIndex ?? 1) - (right.versionIndex ?? 1);
+        if (versionDiff !== 0) return versionDiff;
+        return new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
+      });
+      const versions = sorted.map((attempt, index) => buildExplanationVersionDelta(attempt, sorted[index - 1]));
+      return {
+        concept,
+        versions,
+        latest: versions[versions.length - 1]
+      };
+    })
+    .sort((left, right) => new Date(right.latest.attempt.createdAt).getTime() - new Date(left.latest.attempt.createdAt).getTime());
+}
+
+export function buildExplanationVersionDelta(attempt: ExplanationAttempt, previous?: ExplanationAttempt): ExplanationVersionDelta {
+  const rubricKeys = Object.keys(attempt.rubricScores) as Array<keyof ExplanationAttempt["rubricScores"]>;
+  const improvedRubricKeys = previous
+    ? rubricKeys.filter((key) => attempt.rubricScores[key] > previous.rubricScores[key])
+    : [];
+  const declinedRubricKeys = previous
+    ? rubricKeys.filter((key) => attempt.rubricScores[key] < previous.rubricScores[key])
+    : [];
+  const currentGaps = new Set(attempt.gapTags ?? []);
+  const previousGaps = new Set(previous?.gapTags ?? []);
+  const normalizedCurrent = normalizeExplanationText(attempt.explanation);
+  const normalizedPrevious = previous ? normalizeExplanationText(previous.explanation) : "";
+
+  return {
+    attempt,
+    previous,
+    averageScore: averageRubricScore(attempt.rubricScores),
+    previousAverageScore: previous ? averageRubricScore(previous.rubricScores) : undefined,
+    scoreDelta: previous ? roundOne(averageRubricScore(attempt.rubricScores) - averageRubricScore(previous.rubricScores)) : undefined,
+    improvedRubricKeys: improvedRubricKeys.map(String),
+    declinedRubricKeys: declinedRubricKeys.map(String),
+    resolvedGapTags: [...previousGaps].filter((tag) => !currentGaps.has(tag)),
+    newGapTags: [...currentGaps].filter((tag) => !previousGaps.has(tag)),
+    textDelta: {
+      currentLength: normalizedCurrent.length,
+      previousLength: previous ? normalizedPrevious.length : undefined,
+      lengthDelta: previous ? normalizedCurrent.length - normalizedPrevious.length : undefined,
+      addedSignals: previous ? findAddedExplanationSignals(normalizedCurrent, normalizedPrevious) : []
     }
   };
 }
@@ -374,6 +473,118 @@ export function buildRepairTaskSummary(tasks: RepairTask[]) {
     byReason: top(byReason),
     bySource: top(bySource)
   };
+}
+
+export function deriveInsightActions(input: {
+  dueCards: Card[];
+  pendingCandidates: CardCandidate[];
+  repairTaskSummary: ReturnType<typeof buildRepairTaskSummary>;
+  explanationThreads: ExplanationConceptThread[];
+  sources: SourceDocument[];
+}): InsightAction[] {
+  const actions: InsightAction[] = [];
+  if (input.repairTaskSummary.unresolvedCount > 0) {
+    actions.push({
+      id: "repair-high-confidence-errors",
+      title: "先处理高信心错误",
+      detail: "这些记录最能暴露熟悉感和真实掌握之间的差距。",
+      href: "/review/mistakes",
+      priority: "high",
+      evidenceLabel: `${input.repairTaskSummary.unresolvedCount} 个未解决`
+    });
+  }
+  if (input.dueCards.length > 0) {
+    actions.push({
+      id: "review-due-cards",
+      title: "完成到期校准复习",
+      detail: "先预测信心，再主动回答，避免只看材料造成熟悉感。",
+      href: "/review",
+      priority: input.repairTaskSummary.unresolvedCount > 0 ? "medium" : "high",
+      evidenceLabel: `${input.dueCards.length} 张到期`
+    });
+  }
+  if (input.pendingCandidates.length > 0) {
+    actions.push({
+      id: "approve-candidates",
+      title: "审核候选题",
+      detail: "生成结果还不是学习证据，批准前必须检查问题、答案和来源摘录。",
+      href: "/library#candidate-review",
+      priority: "medium",
+      evidenceLabel: `${input.pendingCandidates.length} 张待审`
+    });
+  }
+  const weakThread = input.explanationThreads.find((thread) => thread.latest.newGapTags.length > 0 || thread.latest.averageScore < 3.5);
+  if (weakThread) {
+    actions.push({
+      id: `revise-explanation-${weakThread.concept}`,
+      title: `修订解释：${weakThread.concept}`,
+      detail: weakThread.latest.newGapTags.length > 0
+        ? `最新版本仍有 ${weakThread.latest.newGapTags.map(rubricInsightLabel).join("、")} 漏洞。`
+        : "最新解释 rubric 仍偏低，适合再补机制、例子或边界。",
+      href: "/explain",
+      priority: input.repairTaskSummary.unresolvedCount > 0 || input.dueCards.length > 0 ? "medium" : "high",
+      evidenceLabel: `v${weakThread.latest.attempt.versionIndex ?? weakThread.versions.length} · ${weakThread.latest.averageScore.toFixed(1)}`
+    });
+  }
+  const activeSource = input.sources.find((source) => source.status !== "archived");
+  if (actions.length < 4 && activeSource) {
+    actions.push({
+      id: `read-material-${activeSource.id}`,
+      title: "回到材料主动阅读",
+      detail: "优先处理未覆盖片段，把阅读转成解释、候选题或复习证据。",
+      href: `/library/${activeSource.id}`,
+      priority: "low",
+      evidenceLabel: activeSource.title
+    });
+  }
+  if (actions.length === 0) {
+    actions.push({
+      id: "import-first-material",
+      title: "导入一份真实材料",
+      detail: "没有足够本地证据时，洞察不会伪造结论。先导入材料并创建第一张来源卡。",
+      href: "/library",
+      priority: "medium",
+      evidenceLabel: "证据不足"
+    });
+  }
+  return actions.slice(0, 4);
+}
+
+function rubricInsightLabel(key: string): string {
+  const labels: Record<string, string> = {
+    clarity: "清晰度",
+    mechanism: "机制",
+    example: "例子",
+    boundary: "边界",
+    contrast: "区分"
+  };
+  return labels[key] ?? key;
+}
+
+function averageRubricScore(scores: ExplanationAttempt["rubricScores"]): number {
+  const values = Object.values(scores);
+  return roundOne(values.reduce((sum, value) => sum + value, 0) / values.length);
+}
+
+function roundOne(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+function normalizeExplanationText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function findAddedExplanationSignals(current: string, previous: string): string[] {
+  const signals = [
+    { key: "机制", patterns: ["机制", "因为", "导致", "作用"] },
+    { key: "例子", patterns: ["例如", "比如", "例子", "案例"] },
+    { key: "边界", patterns: ["边界", "除非", "限制", "适用", "不适用"] },
+    { key: "对比", patterns: ["不同", "相比", "区别", "混淆"] },
+    { key: "反例", patterns: ["反例", "例外", "错误", "误区"] }
+  ];
+  return signals
+    .filter((signal) => signal.patterns.some((pattern) => current.includes(pattern)) && !signal.patterns.some((pattern) => previous.includes(pattern)))
+    .map((signal) => signal.key);
 }
 
 export function buildModules(due: number, pending: number, errors: number): ModuleNavItem[] {

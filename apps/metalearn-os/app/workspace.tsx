@@ -31,7 +31,6 @@ import type {
   CardType,
   CheckInFocusState,
   ConceptRelationType,
-  ExplanationAttempt,
   ImportConflictStrategy,
   ImportPreview,
   ImportProblem,
@@ -78,7 +77,8 @@ import {
   deriveMaterialDetail,
   viewMeta,
   type ActiveReadingTrack,
-  type ChunkEvidenceSummary
+  type ChunkEvidenceSummary,
+  type ExplanationConceptThread
 } from "./workspace-selectors";
 
 type Workspace = ReturnType<typeof useMetaLearnWorkspace>;
@@ -1551,11 +1551,11 @@ function ExplainView({ workspace }: { workspace: Workspace }) {
         </div>
       </Panel>
       <Panel>
-        <h3 className="text-2xl font-semibold tracking-[-0.02em]">解释版本</h3>
+        <SectionHeader title="解释版本证据" detail="版本变化本身是理解证据：看 rubric 是否提升、gap 是否被补上，而不是只看解释文本变长。" />
         <div className="mt-4 grid gap-3">
-          {state.explanations.length === 0 ? <EmptyState title="还没有解释版本" detail="保存 v1 后，再根据追问修订 v2。版本变化本身就是理解证据。" /> : null}
-          {state.explanations.slice(0, 6).map((attempt: ExplanationAttempt) => (
-            <DocumentCard key={attempt.id} title={`${attempt.concept} · v${attempt.versionIndex ?? 1}`} detail={attempt.explanation} meta={attempt.gapTags?.join(" / ") || "rubric"} status={String(scoreAverage(attempt.rubricScores).toFixed(1))} href="/explain" />
+          {derived.explanationThreads.length === 0 ? <EmptyState title="还没有解释版本" detail="保存 v1 后，再根据追问修订 v2。系统会显示变化证据。" /> : null}
+          {derived.explanationThreads.slice(0, 4).map((thread) => (
+            <ExplanationThreadCard key={thread.concept} thread={thread} />
           ))}
         </div>
       </Panel>
@@ -1586,6 +1586,72 @@ function ExplainView({ workspace }: { workspace: Workspace }) {
         </div>
       </Panel>
     </section>
+  );
+}
+
+function ExplanationThreadCard({ thread }: { thread: ExplanationConceptThread }) {
+  const latest = thread.latest;
+  return (
+    <article className="min-w-0 rounded-[1.25rem] border border-zinc-100 bg-white/78 p-4 shadow-sm">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap gap-2">
+            <Badge>v{latest.attempt.versionIndex ?? thread.versions.length}</Badge>
+            <Badge>{latest.averageScore.toFixed(1)} / 5</Badge>
+            {latest.scoreDelta !== undefined ? <Badge>{latest.scoreDelta >= 0 ? "+" : ""}{latest.scoreDelta.toFixed(1)}</Badge> : null}
+          </div>
+          <h4 className="mt-3 break-words text-lg font-semibold tracking-[-0.01em] text-zinc-950">{thread.concept}</h4>
+          <p className="mt-1 line-clamp-3 break-words text-sm leading-6 text-zinc-600">{latest.attempt.explanation}</p>
+        </div>
+        <TextLink href="/explain">继续修订</TextLink>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <VersionDeltaBlock
+          title="rubric 变化"
+          empty="首个版本，暂无对比。"
+          items={[
+            ...latest.improvedRubricKeys.map((key) => `提升：${rubricLabel(key)}`),
+            ...latest.declinedRubricKeys.map((key) => `下降：${rubricLabel(key)}`)
+          ]}
+        />
+        <VersionDeltaBlock
+          title="漏洞变化"
+          empty="没有新增或解决的 gap。"
+          items={[
+            ...latest.resolvedGapTags.map((tag) => `已补：${rubricLabel(tag)}`),
+            ...latest.newGapTags.map((tag) => `新增：${rubricLabel(tag)}`)
+          ]}
+        />
+      </div>
+      <div className="mt-3 rounded-2xl bg-zinc-50 p-3 text-sm leading-6 text-zinc-700">
+        <p className="font-semibold text-zinc-950">文本变化</p>
+        <p className="mt-1">
+          当前 {latest.textDelta.currentLength} 字
+          {latest.textDelta.lengthDelta !== undefined ? ` · 比上一版 ${latest.textDelta.lengthDelta >= 0 ? "增加" : "减少"} ${Math.abs(latest.textDelta.lengthDelta)} 字` : ""}
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {latest.textDelta.addedSignals.length === 0 ? <span className="text-xs text-zinc-500">暂无新增机制、例子、边界、对比或反例信号。</span> : null}
+          {latest.textDelta.addedSignals.map((signal) => <Badge key={signal}>{signal}</Badge>)}
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {thread.versions.map((version) => (
+          <Badge key={version.attempt.id}>v{version.attempt.versionIndex ?? 1} · {version.averageScore.toFixed(1)}</Badge>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function VersionDeltaBlock({ title, items, empty }: { title: string; items: string[]; empty: string }) {
+  return (
+    <div className="min-w-0 rounded-2xl bg-zinc-50 p-3 text-sm leading-6 text-zinc-700">
+      <p className="font-semibold text-zinc-950">{title}</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {items.length === 0 ? <span className="text-xs text-zinc-500">{empty}</span> : null}
+        {items.map((item) => <Badge key={item}>{item}</Badge>)}
+      </div>
+    </div>
   );
 }
 
@@ -1683,6 +1749,20 @@ function InsightsView({ workspace }: { workspace: Workspace }) {
           <ProgressRing value={1 - derived.insight.highConfidenceErrorRate} label={`高信心错误 ${Math.round(derived.insight.highConfidenceErrorRate * 100)}%`} />
           <ProgressRing value={1 - derived.insight.passiveLearningRisk} label={`被动学习风险 ${Math.round(derived.insight.passiveLearningRisk * 100)}%`} />
         </div>
+        <div className="mt-6 rounded-[1.25rem] border border-emerald-100 bg-emerald-50/55 p-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-emerald-950">下一步行动</p>
+              <p className="mt-1 text-sm leading-6 text-emerald-900">洞察只负责指出证据缺口，最终动作仍由你确认。</p>
+            </div>
+            <Badge>{derived.insightActions.length} actions</Badge>
+          </div>
+          <div className="mt-4 grid gap-3">
+            {derived.insightActions.map((action) => (
+              <InsightActionCard key={action.id} action={action} />
+            ))}
+          </div>
+        </div>
         <div className="mt-6 rounded-2xl border border-rose-100 bg-rose-50/70 p-4 text-sm leading-6 text-rose-950">
           <p className="font-semibold">未解决高信心错误任务：{derived.repairTaskSummary.unresolvedCount}</p>
           <p className="mt-1">任务关闭只表示修复动作完成，不表示系统判定你已经掌握。</p>
@@ -1727,6 +1807,30 @@ function InsightsView({ workspace }: { workspace: Workspace }) {
         </div>
       </Panel>
     </section>
+  );
+}
+
+function InsightActionCard({ action }: { action: Workspace["derived"]["insightActions"][number] }) {
+  const tone =
+    action.priority === "high"
+      ? "border-rose-200 bg-white text-rose-950"
+      : action.priority === "medium"
+        ? "border-amber-200 bg-white text-amber-950"
+        : "border-zinc-200 bg-white text-zinc-800";
+  return (
+    <article className={`min-w-0 rounded-2xl border p-3 ${tone}`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap gap-2">
+            <Badge>{action.priority}</Badge>
+            <Badge>{action.evidenceLabel}</Badge>
+          </div>
+          <p className="mt-2 break-words text-sm font-semibold">{action.title}</p>
+          <p className="mt-1 break-words text-sm leading-6 opacity-80">{action.detail}</p>
+        </div>
+        <TextLink href={action.href}>去处理</TextLink>
+      </div>
+    </article>
   );
 }
 
@@ -2108,11 +2212,6 @@ function rubricLabel(key: string): string {
     needs_questions: "需要追问"
   };
   return labels[key] ?? key;
-}
-
-function scoreAverage(scores: ExplanationAttempt["rubricScores"]): number {
-  const values = Object.values(scores);
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 function formatDate(value?: string): string {

@@ -60,9 +60,11 @@ Implemented:
 - high-confidence error repair tasks at `/review/mistakes`;
 - simplified FSRS adapter interface;
 - Feynman explanation versions, gap tags, rubric trend, concept nodes, and confirmed concept edges;
+- explanation version evidence with rubric deltas, resolved/new gap tags, and text-change signals;
 - explanation-to-card handoff;
 - lightweight learning sessions, check-ins, reflections, and prediction bias;
 - insight snapshots and deterministic recommendations;
+- insight action cards that link evidence gaps back to review, repair, candidate approval, explanation, or material reading;
 - JSON export and restore package with manifest, local preflight validation, and conflict handling;
 - CSV and Anki TSV export;
 - one-step data export and two-step local deletion;

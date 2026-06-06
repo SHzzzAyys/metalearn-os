@@ -49,6 +49,8 @@ High-value unit tests should cover:
 - passive learning risk;
 - prediction bias;
 - explanation gap summaries;
+- explanation version thread deltas for rubric changes, resolved/new gap tags, and text-change signals;
+- insight action priority for repair, review, candidate approval, explanation revision, material reading, and insufficient evidence;
 - export manifest shape;
 - import package parse and schema rejection;
 - import preview warnings, repairable issues, and fatal problems;
@@ -69,6 +71,7 @@ Important integration paths:
 - high-confidence error -> mistake reason -> explanation repair;
 - high-confidence error -> repair task -> source/Feynman/remedial card -> resolved;
 - explanation version -> gap tags -> candidate handoff;
+- explanation v1/v2 -> version evidence -> insight action to revise or review;
 - session -> check-in -> reflection -> daily plan;
 - export -> clear -> import restore -> review restored card;
 - failed import -> no IndexedDB mutation.
@@ -91,6 +94,7 @@ Desktop and mobile should cover:
 - active reading track, recommended chunk, and read-after-recall prompts;
 - high-confidence error repair task visibility;
 - Feynman questions and explanation save;
+- explanation version evidence card and insight action cards;
 - insight and privacy copy;
 - JSON restore preview and import report;
 - invalid JSON and fatal import problems;

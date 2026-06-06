@@ -47,6 +47,39 @@ SourceChunk.sourceId -> SourceDocument.id
 
 Cards generated from explanations use a source id shaped around the explanation version and must still remain visible to the user as explanation-derived evidence.
 
+## Explanation Version Evidence
+
+Explanation version evidence is derived runtime state, not a new table.
+
+It groups `ExplanationAttempt` records by `concept`, sorts them by `versionIndex` and `createdAt`, then compares each version with the previous version.
+
+Derived fields include:
+
+- rubric average score;
+- score delta from the previous version;
+- rubric dimensions that improved or declined;
+- gap tags resolved since the previous version;
+- gap tags newly introduced in the current version;
+- text length delta;
+- newly added explanation signals such as mechanism, example, boundary, contrast, or counterexample language.
+
+Important boundary: a better explanation version is evidence that the learner revised the explanation. It does not prove mastery by itself. Mastery still needs retrieval, feedback, and later review evidence.
+
+## Insight Actions
+
+Insight action cards are derived runtime state from current local evidence. They are not persisted.
+
+Priority order:
+
+1. unresolved high-confidence repair tasks;
+2. due calibration reviews;
+3. pending candidate approval;
+4. weak explanation thread revision;
+5. active material reading;
+6. first material import when evidence is insufficient.
+
+Insight actions are navigation aids only. They must not overwrite data, auto-approve cards, or claim that a task is mastered.
+
 ## Active Reading Track
 
 The active reading track is derived runtime state, not an IndexedDB table.

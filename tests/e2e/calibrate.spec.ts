@@ -64,12 +64,14 @@ test("MetaLearn OS completes the unified learning loop", async ({ page }) => {
   await page.getByRole("button", { name: /生成 3 个追问/ }).click();
   await expect(page.getByText("Q1")).toBeVisible();
   await page.getByRole("button", { name: /保存解释版本/ }).click();
-  await expect(page.getByText(/间隔效应 · v1/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "解释版本证据" })).toBeVisible();
+  await expect(page.getByText("首个版本，暂无对比。").first()).toBeVisible();
   await page.getByRole("button", { name: /从漏洞生成卡片/ }).click();
 
   await page.goto("/insights");
   await expect(page.getByRole("heading", { name: "洞察报告" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "校准报告" })).toBeVisible();
+  await expect(page.getByText("下一步行动", { exact: true })).toBeVisible();
 
   await page.goto("/settings");
   await expect(page.getByText("未点击 AI 操作前不上传材料。")).toBeVisible();
@@ -392,6 +394,7 @@ test("MetaLearn OS creates and resolves high-confidence repair tasks", async ({ 
 
   await page.goto("/insights");
   await expect(page.getByText("未解决高信心错误任务：0")).toBeVisible();
+  await expect(page.getByText("下一步行动", { exact: true })).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
 });

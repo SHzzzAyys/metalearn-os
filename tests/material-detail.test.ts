@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { Card, CardCandidate, ReviewLog, SourceChunk, SourceDocument } from "@metalearn/core";
+import type { Card, CardCandidate, ExplanationAttempt, RepairTask, ReviewLog, SourceChunk, SourceDocument } from "@metalearn/core";
 import { createInitialFsrsState } from "@metalearn/learning-science";
 import {
   buildChunkRecallPrompts,
+  buildRepairTaskSummary,
   deriveActiveReadingTrack,
   deriveChunkEvidenceSummaries,
+  deriveExplanationThreads,
+  deriveInsightActions,
   deriveMaterialDetail,
   type WorkspaceState
 } from "../apps/metalearn-os/app/workspace-selectors";
@@ -176,5 +179,110 @@ describe("active reading track selector", () => {
     expect(prompts[0]).toContain("不看原文");
     expect(prompts[1]).toContain("Calibration requires learners");
     expect(prompts[2]).toContain("边界条件");
+  });
+});
+
+describe("explanation thread selector", () => {
+  const v1: ExplanationAttempt = {
+    id: "explain_1",
+    concept: "retrieval",
+    templateId: "course",
+    explanation: "主动提取是从记忆里回答。",
+    versionIndex: 1,
+    linkedCardIds: [],
+    gapTags: ["example", "boundary"],
+    rubricScores: { clarity: 3, mechanism: 2, example: 1, boundary: 1, contrast: 2 },
+    questions: ["给一个例子？"],
+    createdAt: "2026-06-01T00:00:00.000Z"
+  };
+  const v2: ExplanationAttempt = {
+    ...v1,
+    id: "explain_2",
+    explanation: "主动提取是先不看材料，从记忆里回答。比如学完概念后先写出机制，因为这样能暴露熟悉感和掌握之间的差距。边界是没有反馈时错误可能被重复。",
+    versionIndex: 2,
+    parentAttemptId: "explain_1",
+    gapTags: ["contrast"],
+    priorRubricScores: v1.rubricScores,
+    rubricScores: { clarity: 4, mechanism: 4, example: 4, boundary: 3, contrast: 2 },
+    questions: ["和重读有什么区别？"],
+    createdAt: "2026-06-01T00:05:00.000Z"
+  };
+
+  it("builds concept threads with rubric, gap, and text deltas", () => {
+    const threads = deriveExplanationThreads([v2, v1]);
+
+    expect(threads).toHaveLength(1);
+    expect(threads[0].concept).toBe("retrieval");
+    expect(threads[0].versions).toHaveLength(2);
+    expect(threads[0].latest.attempt.id).toBe("explain_2");
+    expect(threads[0].latest.scoreDelta).toBeGreaterThan(1);
+    expect(threads[0].latest.improvedRubricKeys).toEqual(["clarity", "mechanism", "example", "boundary"]);
+    expect(threads[0].latest.resolvedGapTags).toEqual(["example", "boundary"]);
+    expect(threads[0].latest.newGapTags).toEqual(["contrast"]);
+    expect(threads[0].latest.textDelta.addedSignals).toContain("例子");
+    expect(threads[0].latest.textDelta.addedSignals).toContain("边界");
+  });
+});
+
+describe("insight action selector", () => {
+  const repairTask: RepairTask = {
+    id: "repair_1",
+    reviewLogId: "review_a",
+    cardId: "card_a",
+    sourceId: "source_a",
+    sourceChunkId: "chunk_a",
+    status: "open",
+    reason: "not_retrieved",
+    confidence: 5,
+    outcome: "again",
+    tagSnapshot: ["course", "spacing"],
+    createdAt: "2026-06-01T00:00:00.000Z",
+    updatedAt: "2026-06-01T00:00:00.000Z",
+    linkedRemedialCandidateIds: []
+  };
+
+  it("prioritizes repair, due review, candidate review, and weak explanation actions", () => {
+    const weakExplanation: ExplanationAttempt = {
+      id: "explain_weak",
+      concept: "spacing",
+      templateId: "course",
+      explanation: "Spacing is useful.",
+      versionIndex: 1,
+      linkedCardIds: [],
+      gapTags: ["mechanism"],
+      rubricScores: { clarity: 3, mechanism: 2, example: 2, boundary: 2, contrast: 2 },
+      questions: [],
+      createdAt: "2026-06-01T00:00:00.000Z"
+    };
+    const actions = deriveInsightActions({
+      dueCards: [cardA],
+      pendingCandidates: [candidateA],
+      repairTaskSummary: buildRepairTaskSummary([repairTask]),
+      explanationThreads: deriveExplanationThreads([weakExplanation]),
+      sources: [sourceA]
+    });
+
+    expect(actions.map((action) => action.id)).toEqual([
+      "repair-high-confidence-errors",
+      "review-due-cards",
+      "approve-candidates",
+      "revise-explanation-spacing"
+    ]);
+    expect(actions[0].priority).toBe("high");
+    expect(actions[3].detail).toContain("机制");
+  });
+
+  it("falls back to importing material when there is no evidence", () => {
+    const actions = deriveInsightActions({
+      dueCards: [],
+      pendingCandidates: [],
+      repairTaskSummary: buildRepairTaskSummary([]),
+      explanationThreads: [],
+      sources: []
+    });
+
+    expect(actions).toHaveLength(1);
+    expect(actions[0].href).toBe("/library");
+    expect(actions[0].evidenceLabel).toBe("证据不足");
   });
 });

@@ -179,17 +179,26 @@ Design principles:
 
 ## v0.4.0 - Explanation Versions and Insight Quality
 
+Status: partially implemented.
+
 Goal: make Feynman explanations and insights evidence-driven.
+
+Implemented:
+
+- explanation version evidence cards on `/explain`;
+- rubric average and per-dimension improvement/decline between explanation versions;
+- resolved and newly introduced gap tags across versions;
+- text-change signals for newly added mechanism, example, boundary, contrast, or counterexample language;
+- deterministic insight action cards on `/insights` that link back to review, mistake repair, candidate approval, explanation revision, or active material reading;
+- unit coverage for explanation threads and insight action priority.
 
 Planned work:
 
-- show explanation version chains and v1/v2 differences;
-- expose rubric trend and gap tag changes;
 - strengthen concept nodes and confirmed concept edges;
 - generate remedial candidates from explanation gap tags;
 - improve Brier trend, reliability curve, tag overconfidence, and gap distribution charts;
 - add explicit "not enough evidence" thresholds to each insight;
-- add action links from insights into review, mistakes, explanation repair, or material detail pages.
+- deepen action links with scoped filters for material, tag, and concept.
 
 Acceptance criteria:
 
