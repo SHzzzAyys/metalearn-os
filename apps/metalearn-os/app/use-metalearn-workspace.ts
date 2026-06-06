@@ -74,6 +74,11 @@ interface PendingCardRequest {
   requestedCount: number;
 }
 
+interface ReviewScope {
+  tag?: string;
+  sourceId?: string;
+}
+
 interface ManualCardForm {
   isOpen: boolean;
   sourceId: string;
@@ -134,6 +139,7 @@ export function useMetaLearnWorkspace() {
     createMaterialImportDraft({ title: "我的学习材料", inputType: "plain_text", textLength: sampleText.length })
   );
   const [searchQuery, setSearchQuery] = useState("");
+  const [reviewScope, setReviewScopeState] = useState<ReviewScope>({});
   const [confidence, setConfidence] = useState<1 | 2 | 3 | 4 | 5>(3);
   const [effort, setEffort] = useState<1 | 2 | 3 | 4 | 5>(3);
   const [reviewMachine, setReviewMachine] = useState<ReviewStateMachine>(createReviewState());
@@ -251,7 +257,17 @@ export function useMetaLearnWorkspace() {
     });
   }
   const activeSource = state.sources[0];
-  const activeCard = derived.activeCard;
+  const hasReviewScope = Boolean(reviewScope.tag || reviewScope.sourceId);
+  const scopedReviewQueue = useMemo(
+    () => derived.reviewQueue.filter((item) => cardMatchesReviewScope(item.card, reviewScope, state.chunks)),
+    [derived.reviewQueue, reviewScope, state.chunks]
+  );
+  const scopedCards = useMemo(
+    () => state.cards.filter((card) => cardMatchesReviewScope(card, reviewScope, state.chunks)),
+    [state.cards, reviewScope, state.chunks]
+  );
+  const scopedDueCards = scopedCards.filter((card) => new Date(card.dueAt).getTime() <= nowMs);
+  const activeCard = hasReviewScope ? scopedDueCards[0] ?? scopedCards[0] : derived.activeCard;
   const effectiveReviewMachine = useMemo(() => {
     if (!activeCard) return reviewMachine.stage === "idle" ? reviewMachine : createReviewState();
     if (reviewMachine.stage === "feedback") return reviewMachine;
@@ -303,6 +319,22 @@ export function useMetaLearnWorkspace() {
       candidateIds: [],
       error: undefined
     });
+  }
+
+  function setReviewScope(scope: ReviewScope) {
+    const nextScope = {
+      tag: scope.tag?.trim() || undefined,
+      sourceId: scope.sourceId?.trim() || undefined
+    };
+    if (reviewScope.tag === nextScope.tag && reviewScope.sourceId === nextScope.sourceId) return;
+    setReviewScopeState(nextScope);
+    setReviewMachine(createReviewState());
+    setRevealedSourceQuote("");
+    setReviewFeedback(nextScope.tag || nextScope.sourceId ? "已切换复习筛选范围，请从信心预测开始。" : "还没有完成本轮校准复习。");
+  }
+
+  function clearReviewScope() {
+    setReviewScope({});
   }
 
   async function prepareMaterialFileImport(file: File): Promise<ActionResult> {
@@ -1189,6 +1221,11 @@ export function useMetaLearnWorkspace() {
     prepareMaterialFileImport,
     searchQuery,
     setSearchQuery,
+    reviewScope,
+    setReviewScope,
+    clearReviewScope,
+    scopedReviewQueue,
+    scopedReviewCardCount: scopedCards.length,
     confidence,
     chooseConfidence,
     effort,
@@ -1324,4 +1361,13 @@ function buildCurrentImportPayload(state: WorkspaceState): ImportPackagePayload 
     aiRequestPreviews: state.aiRequestPreviews,
     repairTasks: state.repairTasks
   };
+}
+
+function cardMatchesReviewScope(card: Card, scope: ReviewScope, chunks: SourceChunk[]): boolean {
+  if (scope.tag && !card.tags.includes(scope.tag)) return false;
+  if (scope.sourceId) {
+    const chunk = chunks.find((item) => item.id === card.sourceChunkId);
+    if (chunk?.sourceId !== scope.sourceId) return false;
+  }
+  return true;
 }

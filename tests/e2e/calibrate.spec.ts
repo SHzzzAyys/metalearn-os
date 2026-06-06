@@ -50,8 +50,9 @@ test("MetaLearn OS completes the unified learning loop", async ({ page }) => {
   await expect(page.getByRole("button", { name: /批准进入复习/ }).first()).toBeVisible();
   await page.getByRole("button", { name: /批准进入复习/ }).first().click();
 
-  await page.goto("/review");
+  await page.goto("/review?tag=course");
   await expect(page.getByRole("heading", { name: "校准记忆" })).toBeVisible();
+  await expect(page.getByText("复习筛选：tag course")).toBeVisible();
   await expect(page.getByText("来源已隐藏。先主动提取，再在自评后查看证据。")).toBeVisible();
   await page.locator("button").filter({ hasText: /^5$/ }).first().click();
   await page.getByPlaceholder("先回想，再看来源。不要直接复制。").fill("我把熟悉感当成了掌握，但没能说清机制。");
@@ -212,6 +213,22 @@ test("MetaLearn OS saves a selected material file and opens candidate generation
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
+});
+
+test("MetaLearn OS applies tag scope to library candidate review", async ({ page }) => {
+  await page.goto("/library");
+  await page.getByRole("button", { name: "仅保存到资料库", exact: true }).click();
+  await expect(page.getByText(/已导入并分成/)).toBeVisible();
+  await page.getByRole("button", { name: "为最近材料生成候选题", exact: true }).click();
+  await expect(page.getByText("将发送哪些内容")).toBeVisible();
+  await page.getByRole("button", { name: /确认发送并生成候选题/ }).click();
+  await expect(page.getByRole("button", { name: /批准进入复习/ }).first()).toBeVisible();
+
+  await page.goto("/library?tag=course#candidate-review");
+  await expect(page.getByLabel("搜索材料、卡片、解释")).toHaveValue("course");
+  await expect(page.getByText("当前筛选：course")).toBeVisible();
+  await expect(page.getByText("当前显示")).toBeVisible();
+  await expect(page.getByRole("button", { name: /批准进入复习/ }).first()).toBeVisible();
 });
 
 test("MetaLearn OS keeps the material and exposes manual fallback when candidate generation fails", async ({ page }) => {

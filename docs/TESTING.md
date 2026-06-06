@@ -70,6 +70,7 @@ Important integration paths:
 - file selection -> text preview -> save and generate -> upload preview -> candidate review bench;
 - material detail -> reader workbench -> focused chunk -> manual card or Feynman explanation handoff;
 - material detail -> active reading track -> recommended chunk -> manual card, candidate review, review, or evidence panel;
+- insights scoped links -> `/library?tag=...` candidate review and `/review?tag=...` active review scope;
 - failed AI candidate generation -> saved material remains available -> manual card creation;
 - edit candidate -> approve -> review queue;
 - high-confidence error -> mistake reason -> explanation repair;
@@ -101,6 +102,7 @@ Desktop and mobile should cover:
 - explanation version evidence card and insight action cards;
 - calibration evidence quality, confidence reliability curve, and Brier trend visibility on `/insights`;
 - scoped material/tag/concept insight drilldown visibility on `/insights`;
+- tag-scoped library and review routes keep the visible card, queue, and saved review log aligned;
 - insight and privacy copy;
 - JSON restore preview and import report;
 - invalid JSON and fatal import problems;

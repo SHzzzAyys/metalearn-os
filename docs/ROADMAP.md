@@ -193,7 +193,7 @@ Implemented:
 - calibration evidence thresholds that label insufficient review data before showing trend or reliability conclusions;
 - Brier trend by review date and confidence reliability buckets on `/insights`;
 - scoped material, tag, and concept insight drilldowns with evidence status and action links;
-- scoped query handling for high-confidence repair filters and Feynman concept prefill;
+- scoped query handling for library tag filters, review tag/material filters, high-confidence repair filters, and Feynman concept prefill;
 - unit coverage for explanation threads, insight action priority, calibration trend, reliability bucket status, evidence thresholds, and scoped insight derivation.
 
 Planned work:
@@ -201,7 +201,7 @@ Planned work:
 - strengthen concept nodes and confirmed concept edges;
 - generate remedial candidates from explanation gap tags;
 - improve tag overconfidence and gap distribution charts;
-- deepen scoped filters on review, library, and explanation workspaces beyond the current high-confidence repair and concept prefill paths.
+- deepen scoped filters with saved views, scope-specific empty states, and tag/material facets.
 
 Acceptance criteria:
 

@@ -67,6 +67,7 @@ Implemented:
 - insight action cards that link evidence gaps back to review, repair, candidate approval, explanation, or material reading;
 - evidence-thresholded calibration insights with Brier trend and confidence reliability buckets;
 - scoped insight drilldowns for materials, tags, and concepts, each with evidence status and an action link;
+- query-scoped library and review flows for tag/material links from insights;
 - JSON export and restore package with manifest, local preflight validation, and conflict handling;
 - CSV and Anki TSV export;
 - one-step data export and two-step local deletion;

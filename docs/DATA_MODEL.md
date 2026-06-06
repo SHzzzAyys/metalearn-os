@@ -50,6 +50,9 @@ Scoped insights are local selectors, not persisted analytics records:
 - tag scope resolves card tags, pending candidate tags, and repair task tag snapshots;
 - concept scope resolves Feynman explanation threads and linked card IDs;
 - action links may include query parameters such as `tag`, `sourceId`, or `concept`, but they do not upload data or invoke AI.
+- `/library?tag=...` filters the asset search and candidate review bench.
+- `/review?tag=...` and `/review?sourceId=...` scope both the visible queue and the active review card, so review logs are written for the card the user is actually seeing.
+- `/review/mistakes?tag=...` and `/review/mistakes?sourceId=...` filter repair tasks.
 
 ## Source Traceability
 

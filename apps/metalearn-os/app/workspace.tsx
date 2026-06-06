@@ -140,6 +140,14 @@ export function MetaLearnOSPage({ view, sourceId, reviewMode = "main" }: { view:
   }, [view, workspace]);
 
   useEffect(() => {
+    if (view !== "review" || reviewMode !== "main") return;
+    const params = new URLSearchParams(window.location.search);
+    const tag = params.get("tag") ?? undefined;
+    const scopedSourceId = params.get("sourceId") ?? undefined;
+    workspace.setReviewScope({ tag, sourceId: scopedSourceId });
+  }, [view, reviewMode, workspace]);
+
+  useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
@@ -543,6 +551,14 @@ function LibraryView({ workspace }: { workspace: Workspace }) {
   const currentChunkIds = new Set(state.chunks.filter((chunk) => chunk.sourceId === diagnostic.sourceId).map((chunk) => chunk.id));
   const currentMaterialCandidateCount = derived.pendingCandidates.filter((candidate) => currentChunkIds.has(candidate.sourceChunkId)).length;
   const recentCandidateIds = new Set(draft.candidateIds);
+  const activeLibraryQuery = workspace.searchQuery.trim();
+  const displayedCandidates = activeLibraryQuery
+    ? derived.pendingCandidates.filter((candidate) => candidateMatchesSearch(candidate, activeLibraryQuery))
+    : derived.pendingCandidates;
+  function clearLibrarySearch() {
+    workspace.setSearchQuery("");
+    window.history.replaceState(null, "", "/library");
+  }
   async function handleMaterialFile(event: ChangeEvent<HTMLInputElement>) {
     const input = event.currentTarget;
     const file = input.files?.[0];
@@ -639,6 +655,14 @@ function LibraryView({ workspace }: { workspace: Workspace }) {
             <TextInput value={workspace.searchQuery} onChange={(event) => workspace.setSearchQuery(event.target.value)} placeholder="输入 tag、标题、来源片段" />
           </Field>
         </div>
+        {activeLibraryQuery ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-emerald-100 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-950">
+            <span className="break-words">当前筛选：{activeLibraryQuery}</span>
+            <SecondaryButton onClick={clearLibrarySearch}>
+              <X size={16} /> 清除筛选
+            </SecondaryButton>
+          </div>
+        ) : null}
         <div className="mt-5 grid max-h-[520px] gap-3 overflow-auto pr-1">
           {derived.assets.length === 0 ? <EmptyState title="资料库还没有资产" detail="导入材料后，这里会显示材料、候选题、复习卡和解释版本。" /> : null}
           {derived.assets.slice(0, 12).map((asset: StudyAsset) => (
@@ -653,6 +677,7 @@ function LibraryView({ workspace }: { workspace: Workspace }) {
             <p className="mt-1 text-sm text-zinc-600">候选题必须可编辑、可拒绝、可追溯来源；不会自动进队列。</p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Badge>{displayedCandidates.length} 当前显示</Badge>
             <Badge>{derived.pendingCandidates.length} 待审核</Badge>
             <Badge>当前材料 {currentMaterialCandidateCount}</Badge>
             <Badge>最近生成 {draft.candidateIds.length}</Badge>
@@ -662,10 +687,10 @@ function LibraryView({ workspace }: { workspace: Workspace }) {
           </div>
         </div>
         <div className="mt-5 grid gap-4 lg:grid-cols-2">
-          {derived.pendingCandidates.length === 0 ? (
+          {displayedCandidates.length === 0 ? (
             <EmptyState title="没有候选题" detail={diagnostic.blockingReason ?? "先为一份材料生成候选题。无来源片段的问题会被挡在队列外。"} />
           ) : null}
-          {derived.pendingCandidates.slice(0, 8).map((candidate: CardCandidate) => (
+          {displayedCandidates.slice(0, 8).map((candidate: CardCandidate) => (
             <CandidateEditor key={candidate.id} candidate={candidate} workspace={workspace} highlighted={recentCandidateIds.has(candidate.id)} />
           ))}
         </div>
@@ -1291,9 +1316,29 @@ function ReviewView({ workspace }: { workspace: Workspace }) {
   const canAnswer = workspace.reviewStage === "answering" || workspace.reviewStage === "self_rating";
   const canSelfRate = workspace.reviewStage === "self_rating";
   const sourceVisible = workspace.reviewStage === "feedback" || workspace.sourceVisibleBeforeAnswer;
+  const hasScope = Boolean(workspace.reviewScope.tag || workspace.reviewScope.sourceId);
+  const queue = hasScope ? workspace.scopedReviewQueue : derived.reviewQueue;
+  const scopeLabel = reviewScopeLabel(workspace);
   const activeCard = workspace.activeReviewCard ?? derived.activeCard;
+  function clearReviewFilter() {
+    workspace.clearReviewScope();
+    window.history.replaceState(null, "", "/review");
+  }
   return (
     <section className="grid gap-5 xl:grid-cols-[1fr_380px]">
+      {hasScope ? (
+        <div className="xl:col-span-2 rounded-[1.25rem] border border-emerald-100 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-950">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="font-semibold">复习筛选：{scopeLabel}</p>
+              <p className="mt-1 break-words text-emerald-900">当前范围内 {workspace.scopedReviewCardCount} 张卡，队列显示 {queue.length} 条。完成复习时日志会写入这张筛选后的卡。</p>
+            </div>
+            <SecondaryButton onClick={clearReviewFilter}>
+              <X size={16} /> 清除筛选
+            </SecondaryButton>
+          </div>
+        </div>
+      ) : null}
       {activeCard ? (
         <ReviewCard
           title={activeCard.question}
@@ -1341,12 +1386,17 @@ function ReviewView({ workspace }: { workspace: Workspace }) {
           </div>
         </ReviewCard>
       ) : (
-        <EmptyState title="没有可复习卡片" detail="先在资料库生成并批准候选题，复习队列会自动出现。" action={<TextLink href="/library">去资料库</TextLink>} />
+        <EmptyState
+          title={hasScope ? "这个筛选范围没有可复习卡片" : "没有可复习卡片"}
+          detail={hasScope ? "可以清除筛选，或回到资料库为这个 scope 审核候选题、手工建卡。" : "先在资料库生成并批准候选题，复习队列会自动出现。"}
+          action={hasScope ? <SecondaryButton onClick={clearReviewFilter}>清除筛选</SecondaryButton> : <TextLink href="/library">去资料库</TextLink>}
+        />
       )}
       <Panel>
         <h3 className="text-2xl font-semibold tracking-[-0.02em]">队列与错误</h3>
         <div className="mt-4 grid gap-3">
-          {derived.reviewQueue.slice(0, 6).map((item) => (
+          {queue.length === 0 ? <p className="text-sm text-zinc-500">{hasScope ? "当前筛选下没有队列卡片。" : "当前没有队列卡片。"}</p> : null}
+          {queue.slice(0, 6).map((item) => (
             <DocumentCard key={item.card.id} title={item.card.question} detail={`${item.source?.title ?? "来源缺失，需要修复"} · ${item.reason}`} meta={item.card.dueAt.slice(0, 10)} status={item.urgency} href={item.source ? `/library/${item.source.id}` : "/review"} />
           ))}
           <div className="rounded-2xl bg-rose-50 p-4 text-sm leading-6 text-rose-950">
@@ -1982,6 +2032,28 @@ function scopedKindLabel(kind: Workspace["derived"]["scopedInsights"]["materials
   if (kind === "material") return "材料";
   if (kind === "tag") return "tag";
   return "概念";
+}
+
+function candidateMatchesSearch(candidate: CardCandidate, query: string): boolean {
+  const normalized = query.toLowerCase();
+  return [
+    candidate.question,
+    candidate.expectedAnswer,
+    candidate.sourceQuote,
+    candidate.cardType,
+    String(candidate.difficulty),
+    ...candidate.tags
+  ].some((value) => value.toLowerCase().includes(normalized));
+}
+
+function reviewScopeLabel(workspace: Workspace): string {
+  const { tag, sourceId } = workspace.reviewScope;
+  const source = sourceId ? workspace.state.sources.find((item) => item.id === sourceId) : undefined;
+  if (tag && source) return `${source.title} · tag ${tag}`;
+  if (tag) return `tag ${tag}`;
+  if (source) return source.title;
+  if (sourceId) return `材料 ${sourceId}`;
+  return "全部卡片";
 }
 
 function formatPercent(value: number): string {
