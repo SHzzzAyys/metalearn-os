@@ -111,6 +111,26 @@ Acceptance criteria:
 - generation failure preserves the material and exposes manual card creation;
 - no account, cloud sync, OCR, auto-approval, or AI answer grading is introduced.
 
+## v0.3.2 - Product Polish and Workflow Speed
+
+Status: implemented patch.
+
+Goal: make the unified app feel more like a mature learning workspace without weakening the source-evidence and local-first boundaries.
+
+Included:
+
+- home study mode launcher that asks the user what kind of learning action they want to take now;
+- global `Ctrl/Cmd+K` command palette for navigation and high-frequency actions;
+- command entries for material import, due review, high-confidence mistake repair, Feynman explanation, learning compass, insights, export, settings, and manual card creation;
+- mobile-safe command dialog with keyboard dismissal and no horizontal overflow;
+- E2E coverage for command palette navigation.
+
+Design principles:
+
+- use command and mode shortcuts to reduce friction, not to hide review gates;
+- keep source-grounded workflows visible;
+- do not introduce cloud accounts, public sharing, social features, or unsupported learning claims as polish.
+
 ## v0.4.0 - Explanation Versions and Insight Quality
 
 Goal: make Feynman explanations and insights evidence-driven.

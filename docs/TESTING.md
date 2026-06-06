@@ -83,6 +83,7 @@ Desktop and mobile should cover:
 - AI failure shows a concrete error and manual-card fallback;
 - review with confidence prediction;
 - strict review state machine and keyboard shortcuts;
+- home study mode launcher and global command palette navigation;
 - high-confidence error repair task visibility;
 - Feynman questions and explanation save;
 - insight and privacy copy;

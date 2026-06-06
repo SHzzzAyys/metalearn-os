@@ -76,6 +76,24 @@ test("MetaLearn OS completes the unified learning loop", async ({ page }) => {
   await expect(page.locator("body")).not.toContainText("保证变聪明");
 });
 
+test("MetaLearn OS exposes a study mode launcher and command palette", async ({ page }) => {
+  await page.goto("/");
+
+  await expect(page.getByRole("heading", { name: "现在想怎么学" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /校准复习/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "命令" })).toBeVisible();
+
+  await page.keyboard.press("Control+K");
+  await expect(page.getByRole("dialog", { name: "命令中心" })).toBeVisible();
+  await page.getByPlaceholder("搜索命令、页面或学习动作").fill("高信心");
+  await page.getByRole("button", { name: /查看高信心错误/ }).click();
+  await expect(page).toHaveURL(/\/review\/mistakes/);
+  await expect(page.getByRole("heading", { name: "高信心错误", exact: true })).toBeVisible();
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+});
+
 test("MetaLearn OS imports a selectable text-layer PDF locally", async ({ page }) => {
   const pdfText = "MetaLearn PDF import fixture. Active retrieval requires learners to answer before seeing source evidence. Confidence calibration detects high confidence errors.";
 

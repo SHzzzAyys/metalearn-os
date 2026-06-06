@@ -1,13 +1,14 @@
 "use client";
 
 import type { ChangeEvent } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Archive,
   AlertTriangle,
   Brain,
   Check,
   ClipboardCheck,
+  Command as CommandIcon,
   Download,
   EyeOff,
   FileText,
@@ -74,13 +75,26 @@ import { deriveMaterialDetail, viewMeta } from "./workspace-selectors";
 
 type Workspace = ReturnType<typeof useMetaLearnWorkspace>;
 
+interface QuickCommand {
+  id: string;
+  section: string;
+  title: string;
+  detail: string;
+  shortcut?: string;
+  disabled?: boolean;
+  run: () => void | Promise<unknown>;
+}
+
 export function MetaLearnOSPage({ view, sourceId, reviewMode = "main" }: { view: ProductArea; sourceId?: string; reviewMode?: "main" | "mistakes" }) {
   const workspace = useMetaLearnWorkspace();
+  const [isCommandOpen, setIsCommandOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState("");
   const meta =
     view === "review" && reviewMode === "mistakes"
       ? { path: "/review/mistakes", title: "高信心错误", subtitle: "把最危险的熟悉感错误变成可追踪、可修复、可关闭的任务。" }
       : viewMeta[view];
   const { derived, state } = workspace;
+  const quickCommands = useMemo(() => buildQuickCommands(workspace, sourceId), [workspace, sourceId]);
 
   useEffect(() => {
     if (view !== "review") return;
@@ -105,6 +119,24 @@ export function MetaLearnOSPage({ view, sourceId, reviewMode = "main" }: { view:
   }, [view, workspace]);
 
   useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCommandQuery("");
+        setIsCommandOpen(true);
+      }
+      if (event.key === "?") {
+        event.preventDefault();
+        setCommandQuery("");
+        setIsCommandOpen(true);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  useEffect(() => {
     if (view !== "library" || workspace.materialImportDraft.stage !== "candidates_ready") return;
     const timeout = window.setTimeout(() => {
       document.getElementById("candidate-review")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -114,6 +146,9 @@ export function MetaLearnOSPage({ view, sourceId, reviewMode = "main" }: { view:
 
   const actions = (
     <>
+      <SecondaryButton onClick={() => setIsCommandOpen(true)}>
+        <CommandIcon size={16} /> 命令
+      </SecondaryButton>
       <SecondaryButton onClick={workspace.exportJson}>
         <Archive size={16} /> 导出包
       </SecondaryButton>
@@ -161,7 +196,173 @@ export function MetaLearnOSPage({ view, sourceId, reviewMode = "main" }: { view:
         {view === "insights" ? <InsightsView workspace={workspace} /> : null}
         {view === "settings" ? <SettingsView workspace={workspace} /> : null}
       </div>
+      {isCommandOpen ? (
+        <QuickCommandPalette
+          commands={quickCommands}
+          query={commandQuery}
+          onQueryChange={setCommandQuery}
+          onClose={() => setIsCommandOpen(false)}
+        />
+      ) : null}
     </ProductShell>
+  );
+}
+
+function buildQuickCommands(workspace: Workspace, sourceId?: string): QuickCommand[] {
+  const currentSourceId = sourceId ?? workspace.candidateDiagnostic.sourceId ?? workspace.state.sources[0]?.id;
+  const hasSource = Boolean(currentSourceId);
+  const navigate = (href: string) => {
+    window.location.href = href;
+  };
+
+  return [
+    {
+      id: "library-import",
+      section: "资料",
+      title: "导入材料",
+      detail: "选择 PDF/TXT/Markdown，保存后再生成候选题。",
+      shortcut: "G L",
+      run: () => navigate("/library#material-import")
+    },
+    {
+      id: "review-due",
+      section: "复习",
+      title: "开始校准复习",
+      detail: `${workspace.derived.dueCards.length} 张到期卡片。先评信心，再主动回答。`,
+      shortcut: "G R",
+      run: () => navigate("/review")
+    },
+    {
+      id: "mistakes",
+      section: "修复",
+      title: "查看高信心错误",
+      detail: `${workspace.derived.repairTaskSummary.unresolvedCount} 个未解决修复任务。`,
+      run: () => navigate("/review/mistakes")
+    },
+    {
+      id: "explain",
+      section: "解释",
+      title: "费曼解释",
+      detail: "解释一个概念，让 AI 只提追问，不给标准答案。",
+      run: () => navigate("/explain")
+    },
+    {
+      id: "manual-card",
+      section: "资料",
+      title: "从来源手工建卡",
+      detail: hasSource ? "从当前或最近材料选择 chunk，保存为候选题。" : "先导入材料，再从来源片段建卡。",
+      disabled: !hasSource,
+      run: () => {
+        if (currentSourceId) void workspace.startManualCard(currentSourceId);
+      }
+    },
+    {
+      id: "compass",
+      section: "调控",
+      title: "打开学习罗盘",
+      detail: "60 秒计划、check-in 和 2 分钟反思。",
+      run: () => navigate("/compass")
+    },
+    {
+      id: "insights",
+      section: "洞察",
+      title: "查看洞察报告",
+      detail: "Brier、过度自信、高信心错误和薄弱 tag。",
+      run: () => navigate("/insights")
+    },
+    {
+      id: "export",
+      section: "隐私",
+      title: "导出本地备份",
+      detail: "下载 JSON 包；不会上传到服务器。",
+      run: workspace.exportJson
+    },
+    {
+      id: "settings",
+      section: "隐私",
+      title: "设置与隐私中心",
+      detail: "AI provider、本地 mock、导出、删除和隐私边界。",
+      run: () => navigate("/settings")
+    }
+  ];
+}
+
+function QuickCommandPalette({
+  commands,
+  query,
+  onQueryChange,
+  onClose
+}: {
+  commands: QuickCommand[];
+  query: string;
+  onQueryChange: (value: string) => void;
+  onClose: () => void;
+}) {
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredCommands = commands.filter((command) => {
+    if (!normalizedQuery) return true;
+    return `${command.section} ${command.title} ${command.detail}`.toLowerCase().includes(normalizedQuery);
+  });
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  async function runCommand(command: QuickCommand) {
+    if (command.disabled) return;
+    onClose();
+    await command.run();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-start bg-zinc-950/18 px-3 py-16 backdrop-blur-sm sm:px-6" role="presentation" onMouseDown={onClose}>
+      <section
+        role="dialog"
+        aria-label="命令中心"
+        aria-modal="true"
+        className="mx-auto grid w-full max-w-2xl overflow-hidden rounded-[1.25rem] border border-white/80 bg-white shadow-[0_28px_90px_rgba(15,23,42,0.22)]"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="border-b border-zinc-100 p-4">
+          <div className="flex items-center gap-3 rounded-2xl bg-zinc-50 px-3 py-2">
+            <CommandIcon size={18} className="text-emerald-700" />
+            <input
+              autoFocus
+              value={query}
+              onChange={(event) => onQueryChange(event.target.value)}
+              placeholder="搜索命令、页面或学习动作"
+              className="min-h-10 flex-1 bg-transparent text-sm font-medium text-zinc-950 outline-none placeholder:text-zinc-400"
+            />
+            <span className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-500">Esc</span>
+          </div>
+        </div>
+        <div className="max-h-[62vh] overflow-auto p-2">
+          {filteredCommands.length === 0 ? (
+            <EmptyState title="没有匹配命令" detail="试试搜索“复习”“导入”“隐私”或“错误”。" />
+          ) : (
+            filteredCommands.map((command) => (
+              <button
+                key={command.id}
+                disabled={command.disabled}
+                onClick={() => void runCommand(command)}
+                className="grid w-full min-w-0 grid-cols-[88px_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl px-3 py-3 text-left transition hover:bg-emerald-50/80 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                <span className="text-xs font-semibold text-emerald-700">{command.section}</span>
+                <span className="min-w-0">
+                  <span className="block break-words text-sm font-semibold text-zinc-950">{command.title}</span>
+                  <span className="mt-1 block break-words text-xs leading-5 text-zinc-500">{command.detail}</span>
+                </span>
+                {command.shortcut ? <span className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-500">{command.shortcut}</span> : null}
+              </button>
+            ))
+          )}
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -222,7 +423,8 @@ function HomeView({ workspace }: { workspace: Workspace }) {
         </Button>
       </TaskRail>
       <Panel>
-        <div className="flex items-center justify-between gap-3">
+        <StudyModeLauncher workspace={workspace} />
+        <div className="mt-6 flex items-center justify-between gap-3 border-t border-zinc-100 pt-5">
           <div>
             <h3 className="text-2xl font-semibold tracking-[-0.02em]">当前学习资产</h3>
             <p className="mt-1 text-sm text-zinc-600">材料、候选题、卡片和解释版本统一管理。</p>
@@ -254,6 +456,63 @@ function HomeView({ workspace }: { workspace: Workspace }) {
   );
 }
 
+function StudyModeLauncher({ workspace }: { workspace: Workspace }) {
+  const { derived, state } = workspace;
+  const modes = [
+    {
+      label: "导入资料",
+      href: "/library#material-import",
+      detail: state.sources.length ? `${state.sources.length} 份材料，继续生成候选题` : "从真实材料开始，不从空白题库开始",
+      meta: "source-first"
+    },
+    {
+      label: "校准复习",
+      href: "/review",
+      detail: `${derived.dueCards.length} 张到期卡片`,
+      meta: "confidence first"
+    },
+    {
+      label: "修复错误",
+      href: "/review/mistakes",
+      detail: `${derived.repairTaskSummary.unresolvedCount} 个高信心错误`,
+      meta: "repair loop"
+    },
+    {
+      label: "费曼解释",
+      href: "/explain",
+      detail: state.explanations.length ? `${state.explanations.length} 个解释版本` : "用追问找出理解漏洞",
+      meta: "ask, not answer"
+    },
+    {
+      label: "计划反思",
+      href: "/compass",
+      detail: state.sessions.length ? `${state.sessions.length} 次学习会话` : "60 秒计划，2 分钟反思",
+      meta: "low overhead"
+    }
+  ];
+
+  return (
+    <div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h3 className="text-2xl font-semibold tracking-[-0.02em]">现在想怎么学</h3>
+          <p className="mt-1 text-sm leading-6 text-zinc-600">从资料、复习、修复、解释或计划进入；每条路径都保留来源证据。</p>
+        </div>
+        <span className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-semibold text-zinc-600">Ctrl / Cmd + K</span>
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+        {modes.map((mode) => (
+          <a key={mode.label} href={mode.href} className="group min-w-0 rounded-2xl bg-zinc-50 px-4 py-3 transition hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+            <span className="block text-xs font-semibold text-emerald-700">{mode.meta}</span>
+            <span className="mt-2 block break-words text-base font-semibold text-zinc-950">{mode.label}</span>
+            <span className="mt-1 block break-words text-xs leading-5 text-zinc-500">{mode.detail}</span>
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function LibraryView({ workspace }: { workspace: Workspace }) {
   const { derived, state } = workspace;
   const draft = workspace.materialImportDraft;
@@ -273,7 +532,7 @@ function LibraryView({ workspace }: { workspace: Workspace }) {
 
   return (
     <section className="grid gap-5 xl:grid-cols-[1fr_430px]">
-      <Panel>
+      <Panel id="material-import">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <h3 className="text-2xl font-semibold tracking-[-0.02em]">导入材料</h3>
