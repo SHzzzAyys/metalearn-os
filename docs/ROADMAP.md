@@ -196,6 +196,7 @@ Implemented:
 - scoped query handling for library tag filters, review tag/material filters, high-confidence repair filters, and Feynman concept prefill;
 - home study views that turn scoped evidence into one-click repair, review, candidate, material, tag, or concept entries;
 - user-pinned study views stored locally and included in JSON backup/restore packages;
+- Settings management for pinned study views, including local title/detail edits, priority tuning, and last-opened tracking;
 - unit coverage for explanation threads, insight action priority, calibration trend, reliability bucket status, evidence thresholds, scoped insight derivation, and study view priority.
 
 Planned work:
@@ -203,7 +204,7 @@ Planned work:
 - strengthen concept nodes and confirmed concept edges;
 - generate remedial candidates from explanation gap tags;
 - improve tag overconfidence and gap distribution charts;
-- deepen scoped filters with editable saved-view definitions, scope-specific empty states, and tag/material facets.
+- deepen scoped filters with scope-specific empty states, tag/material facets, and richer saved-view definition rules beyond local labels.
 
 Acceptance criteria:
 

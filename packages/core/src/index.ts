@@ -476,6 +476,8 @@ export interface LearningEvent {
     | "repair_task_updated"
     | "repair_task_resolved"
     | "study_view_saved"
+    | "study_view_updated"
+    | "study_view_opened"
     | "study_view_removed";
   confidence?: 1 | 2 | 3 | 4 | 5;
   outcome?: ReviewOutcome | "completed" | "saved" | "exported";

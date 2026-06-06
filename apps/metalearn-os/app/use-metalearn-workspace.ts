@@ -217,7 +217,25 @@ export function useMetaLearnWorkspace() {
       db.repairTasks.orderBy("createdAt").reverse().toArray(),
       db.savedStudyViews.orderBy("updatedAt").reverse().toArray()
     ]);
-    setState({ sources, chunks, importJobs, candidates, cards, logs, sessions, checkIns, reflections, explanations, conceptNodes, conceptEdges, insights, aiConfigs, aiRequestPreviews, repairTasks, savedStudyViews });
+    setState({
+      sources,
+      chunks,
+      importJobs,
+      candidates,
+      cards,
+      logs,
+      sessions,
+      checkIns,
+      reflections,
+      explanations,
+      conceptNodes,
+      conceptEdges,
+      insights,
+      aiConfigs,
+      aiRequestPreviews,
+      repairTasks,
+      savedStudyViews: savedStudyViews.sort(compareSavedStudyViews)
+    });
     setNowMs(Date.now());
     setIsLoading(false);
   }, []);
@@ -1059,6 +1077,40 @@ export function useMetaLearnWorkspace() {
     return setAction(result(true, "已取消固定学习视图。"));
   }
 
+  async function updateSavedStudyView(id: string, patch: { title: string; detail: string; priority: SavedStudyView["priority"] }): Promise<ActionResult> {
+    const existing = state.savedStudyViews.find((item) => item.id === id);
+    if (!existing) return setAction(result(false, "找不到这个固定学习视图。"));
+    const titleValue = patch.title.trim();
+    const detailValue = patch.detail.trim();
+    if (titleValue.length < 2) return setAction(result(false, "视图标题至少需要 2 个字符。"));
+    if (detailValue.length < 6) return setAction(result(false, "视图说明至少需要 6 个字符，避免固定入口失去语境。"));
+    if (!["high", "medium", "low"].includes(patch.priority)) return setAction(result(false, "优先级只能是 high、medium 或 low。"));
+    const timestamp = new Date().toISOString();
+    await getMetaLearnDb().savedStudyViews.put({
+      ...existing,
+      title: titleValue,
+      detail: detailValue,
+      priority: patch.priority,
+      updatedAt: timestamp
+    });
+    await saveLearningEvent({ id: createId("event"), appId: "metalearn-os", actionType: "study_view_updated", outcome: "saved", createdAt: timestamp });
+    await loadData();
+    return setAction(result(true, "固定学习视图已更新。"));
+  }
+
+  async function openSavedStudyView(id: string): Promise<ActionResult> {
+    const existing = state.savedStudyViews.find((item) => item.id === id);
+    if (!existing) return setAction(result(false, "找不到这个固定学习视图。"));
+    const timestamp = new Date().toISOString();
+    await getMetaLearnDb().savedStudyViews.put({
+      ...existing,
+      lastOpenedAt: timestamp
+    });
+    await saveLearningEvent({ id: createId("event"), appId: "metalearn-os", actionType: "study_view_opened", outcome: "completed", createdAt: timestamp });
+    window.location.href = existing.href;
+    return result(true, "正在打开固定学习视图。");
+  }
+
   async function saveAIConfig(): Promise<ActionResult> {
     const timestamp = new Date().toISOString();
     const config: AIProviderConfig = {
@@ -1349,6 +1401,8 @@ export function useMetaLearnWorkspace() {
     recordCheckIn,
     saveInsight,
     saveStudyView,
+    updateSavedStudyView,
+    openSavedStudyView,
     removeSavedStudyView,
     saveAIConfig,
     resetLocalData,
@@ -1379,6 +1433,21 @@ function scoreAverage(scores: ExplanationAttempt["rubricScores"]): number {
 
 function buildManualSourceQuote(chunk: SourceChunk): string {
   return chunk.text.replace(/\s+/g, " ").trim().slice(0, 260);
+}
+
+function compareSavedStudyViews(left: SavedStudyView, right: SavedStudyView): number {
+  const leftPriority = studyViewPriorityRank(left.priority);
+  const rightPriority = studyViewPriorityRank(right.priority);
+  if (leftPriority !== rightPriority) return rightPriority - leftPriority;
+  const leftTime = Date.parse(left.lastOpenedAt ?? left.updatedAt);
+  const rightTime = Date.parse(right.lastOpenedAt ?? right.updatedAt);
+  return rightTime - leftTime;
+}
+
+function studyViewPriorityRank(priority: SavedStudyView["priority"]): number {
+  if (priority === "high") return 3;
+  if (priority === "medium") return 2;
+  return 1;
 }
 
 function buildCurrentImportPayload(state: WorkspaceState): ImportPackagePayload {

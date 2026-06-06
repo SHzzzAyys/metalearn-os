@@ -99,6 +99,17 @@ test("MetaLearn OS exposes a study mode launcher and command palette", async ({ 
   await expect(page.getByText("固定视图", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "取消固定" }).first()).toBeVisible();
 
+  await page.goto("/settings");
+  await expect(page.getByRole("heading", { name: "固定学习视图" })).toBeVisible();
+  await page.getByLabel("视图标题 1").fill("我的校准修复视图");
+  await page.getByLabel("视图说明 1").fill("优先处理今天最值得继续的学习范围");
+  await page.getByLabel("优先级 1").selectOption("high");
+  await page.getByRole("button", { name: "保存视图" }).click();
+  await expect(page.getByText("固定学习视图已更新。")).toBeVisible();
+  await page.goto("/");
+  await expect(page.getByText("我的校准修复视图")).toBeVisible();
+  await expect(page.getByRole("button", { name: "进入视图" }).first()).toBeVisible();
+
   await page.keyboard.press("Control+K");
   await expect(page.getByRole("dialog", { name: "命令中心" })).toBeVisible();
   await page.getByPlaceholder("搜索命令、页面或学习动作").fill("高信心");

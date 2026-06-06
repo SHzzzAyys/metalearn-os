@@ -44,7 +44,8 @@ Derived insight evidence:
 - `insightEvidenceThresholds`: local evidence gates for trend and reliability readability. These are derived from review logs and are not stored in IndexedDB.
 - `scopedInsights`: derived material, tag, and concept groups. Each item carries an evidence status, a metric label, detail chips, and an action link back to the relevant workspace.
 - `studyViews`: derived home entries that turn repair tasks, due cards, pending candidates, and scoped insights into one-click learning views.
-- `savedStudyViews`: persisted copies of user-pinned study views. They store a title, detail, href, scope kind, optional scope value, metric label, priority, and timestamps. They do not store duplicated material text or card content.
+- `savedStudyViews`: persisted copies of user-pinned study views. They store a title, detail, href, scope kind, optional scope value, metric label, priority, `updatedAt`, and optional `lastOpenedAt`. They do not store duplicated material text or card content.
+- Saved study view management is local metadata only: editing a pinned title, detail, or priority does not change cards, chunks, reviews, or repair tasks. Opening a pinned view updates `lastOpenedAt` and writes a `study_view_opened` event so the home launcher can keep useful views near the top without inventing learning evidence.
 - Thin evidence must be shown as thin evidence. The UI must not present empty or one-sample metrics as stable learning conclusions.
 
 Scoped insights are local selectors, not persisted analytics records:

@@ -251,7 +251,7 @@ function buildQuickCommands(workspace: Workspace, sourceId?: string): QuickComma
     section: "固定视图",
     title: view.title,
     detail: `${studyViewScopeLabel(view.scopeKind)} · ${view.metric}`,
-    run: () => navigate(view.href)
+    run: () => workspace.openSavedStudyView(view.id)
   }));
 
   return [
@@ -566,7 +566,7 @@ function StudyModeLauncher({ workspace }: { workspace: Workspace }) {
             </div>
             <div className="grid gap-2 md:grid-cols-2">
               {state.savedStudyViews.map((view) => (
-                <StudyViewLink key={view.id} view={view} saved onRemove={() => void workspace.removeSavedStudyView(view.id)} />
+                <StudyViewLink key={view.id} view={view} saved onOpen={() => void workspace.openSavedStudyView(view.id)} onRemove={() => void workspace.removeSavedStudyView(view.id)} />
               ))}
             </div>
           </div>
@@ -592,11 +592,13 @@ type StudyViewDisplay = Workspace["derived"]["studyViews"][number] | SavedStudyV
 function StudyViewLink({
   view,
   saved = false,
+  onOpen,
   onSave,
   onRemove
 }: {
   view: StudyViewDisplay;
   saved?: boolean;
+  onOpen?: () => void;
   onSave?: () => void;
   onRemove?: () => void;
 }) {
@@ -617,7 +619,13 @@ function StudyViewLink({
       <p className="mt-2 break-words text-sm font-semibold">{view.title}</p>
       <p className="mt-1 break-words text-xs leading-5 opacity-80">{view.detail}</p>
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <TextLink href={view.href}>进入视图</TextLink>
+        {onOpen ? (
+          <button type="button" className="text-sm font-semibold text-emerald-800 underline-offset-4 hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-500" onClick={onOpen}>
+            进入视图
+          </button>
+        ) : (
+          <TextLink href={view.href}>进入视图</TextLink>
+        )}
         {saved ? (
           <SecondaryButton className="!min-h-8 !rounded-lg !px-2.5 !py-1 !text-xs" onClick={onRemove}>
             <BookmarkX size={14} /> 取消固定
@@ -643,6 +651,15 @@ function studyViewScopeLabel(kind: SavedStudyView["scopeKind"]): string {
     custom: "custom"
   };
   return labels[kind];
+}
+
+function studyViewPriorityText(priority: SavedStudyView["priority"]): string {
+  const labels: Record<SavedStudyView["priority"], string> = {
+    high: "高优先级",
+    medium: "中优先级",
+    low: "低优先级"
+  };
+  return labels[priority];
 }
 
 function LibraryView({ workspace }: { workspace: Workspace }) {
@@ -2191,49 +2208,143 @@ function InsightActionCard({ action }: { action: Workspace["derived"]["insightAc
 function SettingsView({ workspace }: { workspace: Workspace }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   return (
-    <section className="grid gap-5 xl:grid-cols-[1fr_380px]">
-      <Panel>
-        <h3 className="text-2xl font-semibold tracking-[-0.02em]">AI provider</h3>
-        <p className="mt-1 text-sm text-zinc-600">第一版仍使用 local mock。真实 provider 接入时，上传前必须预览将发送的 chunk。</p>
-        <div className="mt-5 grid gap-4 md:grid-cols-2">
-          <Field label="Provider">
-            <TextInput value={workspace.providerName} onChange={(event) => workspace.setProviderName(event.target.value)} />
-          </Field>
-          <Field label="Model">
-            <TextInput value={workspace.modelName} onChange={(event) => workspace.setModelName(event.target.value)} />
-          </Field>
+    <section className="grid gap-5">
+      <div className="grid gap-5 xl:grid-cols-[1fr_380px]">
+        <Panel>
+          <h3 className="text-2xl font-semibold tracking-[-0.02em]">AI provider</h3>
+          <p className="mt-1 text-sm text-zinc-600">第一版仍使用 local mock。真实 provider 接入时，上传前必须预览将发送的 chunk。</p>
+          <div className="mt-5 grid gap-4 md:grid-cols-2">
+            <Field label="Provider">
+              <TextInput value={workspace.providerName} onChange={(event) => workspace.setProviderName(event.target.value)} />
+            </Field>
+            <Field label="Model">
+              <TextInput value={workspace.modelName} onChange={(event) => workspace.setModelName(event.target.value)} />
+            </Field>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button onClick={() => void workspace.saveAIConfig()}>
+              <Save size={16} /> 保存设置
+            </Button>
+            <SecondaryButton onClick={workspace.exportJson}>
+              <Download size={16} /> 导出全部数据
+            </SecondaryButton>
+          </div>
+        </Panel>
+        <Panel>
+          <h3 className="text-2xl font-semibold tracking-[-0.02em]">隐私中心</h3>
+          <div className="mt-4 grid gap-3 text-sm leading-6 text-zinc-700">
+            <PrivacyLine icon={<Lock size={16} />} text="默认本地 IndexedDB 保存。" />
+            <PrivacyLine icon={<EyeOff size={16} />} text="未点击 AI 操作前不上传材料。" />
+            <PrivacyLine icon={<FileText size={16} />} text="所有候选题必须保留来源片段。" />
+            <PrivacyLine icon={<Brain size={16} />} text={`当前模式：${workspace.state.aiConfigs[0]?.mode ?? "local_mock"}`} />
+          </div>
+          <div className="mt-5 grid gap-2">
+            {!confirmDelete ? (
+              <SecondaryButton onClick={() => setConfirmDelete(true)}>
+                <Trash2 size={16} /> 准备删除本地数据
+              </SecondaryButton>
+            ) : (
+              <Button className="!border-rose-900 !bg-rose-900" onClick={() => void workspace.resetLocalData()}>
+                <Trash2 size={16} /> 确认删除
+              </Button>
+            )}
+            <p className="text-xs text-zinc-500">删除后 IndexedDB 数据表会清空。建议先导出。</p>
+          </div>
+        </Panel>
+      </div>
+      <SavedStudyViewsSettings workspace={workspace} />
+    </section>
+  );
+}
+
+type SavedStudyViewDraft = Pick<SavedStudyView, "title" | "detail" | "priority">;
+
+function SavedStudyViewsSettings({ workspace }: { workspace: Workspace }) {
+  return (
+    <Panel>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h3 className="text-2xl font-semibold tracking-[-0.02em]">固定学习视图</h3>
+          <p className="mt-1 max-w-[78ch] text-sm leading-6 text-zinc-600">
+            把常用的错误、到期、材料、tag 或概念范围固定成可复用入口。固定视图只保存范围和标题，不复制材料正文。
+          </p>
         </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Button onClick={() => void workspace.saveAIConfig()}>
-            <Save size={16} /> 保存设置
-          </Button>
-          <SecondaryButton onClick={workspace.exportJson}>
-            <Download size={16} /> 导出全部数据
+        <TextLink href="/">回到首页视图</TextLink>
+      </div>
+      {workspace.state.savedStudyViews.length === 0 ? (
+        <div className="mt-5">
+          <EmptyState title="还没有固定视图" detail="在首页的“继续学习视图”里固定一个范围后，可以在这里改名、调整优先级和取消固定。" />
+        </div>
+      ) : (
+        <div className="mt-5 grid gap-3">
+          {workspace.state.savedStudyViews.map((view, index) => (
+            <SavedStudyViewSettingsRow key={`${view.id}-${view.updatedAt}`} view={view} index={index} workspace={workspace} />
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function SavedStudyViewSettingsRow({ view, index, workspace }: { view: SavedStudyView; index: number; workspace: Workspace }) {
+  const [draft, setDraft] = useState<SavedStudyViewDraft>({
+    title: view.title,
+    detail: view.detail,
+    priority: view.priority
+  });
+
+  function updateDraft(patch: Partial<SavedStudyViewDraft>) {
+    setDraft((current) => ({ ...current, ...patch }));
+  }
+
+  return (
+    <article className="min-w-0 rounded-[1.25rem] border border-zinc-100 bg-zinc-50/70 p-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap gap-2">
+            <Badge>{studyViewScopeLabel(view.scopeKind)}</Badge>
+            <Badge>{view.metric}</Badge>
+            <Badge>{studyViewPriorityText(view.priority)}</Badge>
+          </div>
+          <p className="mt-3 break-words text-sm leading-6 text-zinc-600">
+            最近打开：{view.lastOpenedAt ? formatDate(view.lastOpenedAt) : "尚未打开"} · 最近更新：{formatDate(view.updatedAt)}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <SecondaryButton className="!min-h-9 !px-3 !py-1.5" onClick={() => void workspace.openSavedStudyView(view.id)}>
+            <Link2 size={15} /> 打开视图
+          </SecondaryButton>
+          <SecondaryButton className="!min-h-9 !px-3 !py-1.5" onClick={() => void workspace.removeSavedStudyView(view.id)}>
+            <BookmarkX size={15} /> 取消固定
           </SecondaryButton>
         </div>
-      </Panel>
-      <Panel>
-        <h3 className="text-2xl font-semibold tracking-[-0.02em]">隐私中心</h3>
-        <div className="mt-4 grid gap-3 text-sm leading-6 text-zinc-700">
-          <PrivacyLine icon={<Lock size={16} />} text="默认本地 IndexedDB 保存。" />
-          <PrivacyLine icon={<EyeOff size={16} />} text="未点击 AI 操作前不上传材料。" />
-          <PrivacyLine icon={<FileText size={16} />} text="所有候选题必须保留来源片段。" />
-          <PrivacyLine icon={<Brain size={16} />} text={`当前模式：${workspace.state.aiConfigs[0]?.mode ?? "local_mock"}`} />
-        </div>
-        <div className="mt-5 grid gap-2">
-          {!confirmDelete ? (
-            <SecondaryButton onClick={() => setConfirmDelete(true)}>
-              <Trash2 size={16} /> 准备删除本地数据
-            </SecondaryButton>
-          ) : (
-            <Button className="!border-rose-900 !bg-rose-900" onClick={() => void workspace.resetLocalData()}>
-              <Trash2 size={16} /> 确认删除
-            </Button>
-          )}
-          <p className="text-xs text-zinc-500">删除后 IndexedDB 数据表会清空。建议先导出。</p>
-        </div>
-      </Panel>
-    </section>
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.35fr)_170px]">
+        <Field label={`视图标题 ${index + 1}`}>
+          <TextInput value={draft.title} onChange={(event) => updateDraft({ title: event.target.value })} />
+        </Field>
+        <Field label={`视图说明 ${index + 1}`}>
+          <TextInput value={draft.detail} onChange={(event) => updateDraft({ detail: event.target.value })} />
+        </Field>
+        <Field label={`优先级 ${index + 1}`}>
+          <select
+            className="min-h-11 min-w-0 rounded-xl border border-zinc-200 bg-white/90 px-3 py-2 text-sm text-zinc-950 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+            value={draft.priority}
+            onChange={(event) => updateDraft({ priority: event.target.value as SavedStudyView["priority"] })}
+          >
+            <option value="high">高优先级</option>
+            <option value="medium">中优先级</option>
+            <option value="low">低优先级</option>
+          </select>
+        </Field>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Button onClick={() => void workspace.updateSavedStudyView(view.id, draft)}>
+          <Save size={16} /> 保存视图
+        </Button>
+        <span className="break-all text-xs leading-5 text-zinc-500">{view.href}</span>
+      </div>
+    </article>
   );
 }
 

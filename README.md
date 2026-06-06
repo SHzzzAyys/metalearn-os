@@ -69,7 +69,7 @@ Implemented:
 - scoped insight drilldowns for materials, tags, and concepts, each with evidence status and an action link;
 - query-scoped library and review flows for tag/material links from insights;
 - home study views that surface the next useful repair, due-review, candidate, material, tag, or concept scope;
-- user-pinned study views on the home launcher, persisted locally and included in JSON backup/restore;
+- user-pinned study views on the home launcher, persisted locally, manageable in Settings, and included in JSON backup/restore;
 - JSON export and restore package with manifest, local preflight validation, and conflict handling;
 - CSV and Anki TSV export;
 - one-step data export and two-step local deletion;
