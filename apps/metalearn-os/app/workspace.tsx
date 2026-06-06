@@ -39,6 +39,7 @@ import type {
   MistakeReason,
   ProductArea,
   RepairTask,
+  ReviewLog,
   ReviewOutcome,
   SourceChunk,
   SourceDocument,
@@ -83,6 +84,14 @@ interface QuickCommand {
   shortcut?: string;
   disabled?: boolean;
   run: () => void | Promise<unknown>;
+}
+
+interface ChunkEvidenceSummary {
+  chunkId: string;
+  candidateCount: number;
+  approvedCardCount: number;
+  reviewCount: number;
+  status: "uncovered" | "candidate" | "carded" | "reviewed";
 }
 
 export function MetaLearnOSPage({ view, sourceId, reviewMode = "main" }: { view: ProductArea; sourceId?: string; reviewMode?: "main" | "mistakes" }) {
@@ -721,6 +730,161 @@ function MaterialGenerationDiagnosticPanel({ diagnostic }: { diagnostic: Candida
   );
 }
 
+function MaterialReaderWorkbench({
+  source,
+  chunks,
+  filteredChunks,
+  focusedChunk,
+  chunkEvidence,
+  readerQuery,
+  onReaderQueryChange,
+  onFocusChunk,
+  archived,
+  workspace
+}: {
+  source: SourceDocument;
+  chunks: SourceChunk[];
+  filteredChunks: SourceChunk[];
+  focusedChunk?: SourceChunk;
+  chunkEvidence: Map<string, ChunkEvidenceSummary>;
+  readerQuery: string;
+  onReaderQueryChange: (value: string) => void;
+  onFocusChunk: (chunkId: string) => void;
+  archived: boolean;
+  workspace: Workspace;
+}) {
+  const coveredCount = chunks.filter((chunk) => (chunkEvidence.get(chunk.id)?.status ?? "uncovered") !== "uncovered").length;
+  const totalCards = chunks.reduce((sum, chunk) => sum + (chunkEvidence.get(chunk.id)?.approvedCardCount ?? 0), 0);
+  const totalReviews = chunks.reduce((sum, chunk) => sum + (chunkEvidence.get(chunk.id)?.reviewCount ?? 0), 0);
+  const totalCandidates = chunks.reduce((sum, chunk) => sum + (chunkEvidence.get(chunk.id)?.candidateCount ?? 0), 0);
+
+  return (
+    <Panel>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <SectionHeader title="阅读工作台" detail="像读材料一样处理来源：定位 chunk、检查证据覆盖、从当前片段直接建卡或进入费曼解释。" />
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:min-w-[460px]">
+          <MaterialStat label="覆盖片段" value={coveredCount} />
+          <MaterialStat label="待审候选" value={totalCandidates} />
+          <MaterialStat label="卡片" value={totalCards} />
+          <MaterialStat label="复习证据" value={totalReviews} />
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-2xl bg-zinc-50 p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-zinc-950">证据覆盖</p>
+            <p className="mt-1 text-xs leading-5 text-zinc-500">绿色越深，说明该片段越接近“已被提取并复习”。空白片段优先补卡或解释。</p>
+          </div>
+          <Badge>{chunks.length ? Math.round((coveredCount / chunks.length) * 100) : 0}% covered</Badge>
+        </div>
+        <div className="mt-4 grid grid-cols-6 gap-2 sm:grid-cols-10 lg:grid-cols-12">
+          {chunks.map((chunk) => {
+            const evidence = chunkEvidence.get(chunk.id);
+            const status = evidence?.status ?? "uncovered";
+            return (
+              <button
+                key={chunk.id}
+                type="button"
+                onClick={() => onFocusChunk(chunk.id)}
+                aria-label={`片段 ${chunk.index + 1} ${chunkStatusLabel(status)}`}
+                className={`h-9 rounded-xl border text-xs font-semibold transition hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 ${chunkCoverageClass(status, focusedChunk?.id === chunk.id)}`}
+              >
+                {chunk.index + 1}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-w-0 rounded-[1.25rem] border border-emerald-100 bg-emerald-50/45 p-5">
+          {focusedChunk ? (
+            <>
+              <p className="mb-3 text-sm font-semibold text-emerald-950">聚焦片段</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge>{source.title}</Badge>
+                <Badge>片段 #{focusedChunk.index + 1}</Badge>
+                <Badge>{chunkStatusLabel(chunkEvidence.get(focusedChunk.id)?.status ?? "uncovered")}</Badge>
+              </div>
+              <p className="mt-4 whitespace-pre-wrap break-words text-base leading-8 text-zinc-900">{focusedChunk.text}</p>
+              <div className="mt-5 flex flex-wrap gap-2">
+                <Button disabled={archived} onClick={() => void workspace.startManualCard(source.id, focusedChunk.id)}>
+                  <FileText size={16} /> 用当前片段建卡
+                </Button>
+                <SecondaryButton disabled={archived} onClick={() => openChunkInExplain(source, focusedChunk)}>
+                  <HelpCircle size={16} /> 用当前片段解释
+                </SecondaryButton>
+                <TextLink href="/review">复习相关卡片</TextLink>
+              </div>
+            </>
+          ) : (
+            <EmptyState title="没有可读片段" detail="这份材料没有可用 chunk。请重新导入可复制文本层材料。" />
+          )}
+        </div>
+
+        <div className="min-w-0 rounded-[1.25rem] border border-zinc-100 bg-white/70 p-4">
+          <Field label="搜索来源片段">
+            <TextInput value={readerQuery} onChange={(event) => onReaderQueryChange(event.target.value)} placeholder="输入关键词定位 chunk" />
+          </Field>
+          <div className="mt-4 max-h-[560px] overflow-auto pr-1">
+            <p className="text-sm font-semibold text-zinc-950">来源片段</p>
+            <div className="mt-3 grid gap-2">
+              {filteredChunks.length === 0 ? <EmptyState title="没有匹配片段" detail="换一个关键词，或清空搜索后查看全部来源。" /> : null}
+              {filteredChunks.map((chunk) => (
+                <ReaderChunkRow
+                  key={chunk.id}
+                  chunk={chunk}
+                  evidence={chunkEvidence.get(chunk.id)}
+                  active={focusedChunk?.id === chunk.id}
+                  archived={archived}
+                  onFocus={() => onFocusChunk(chunk.id)}
+                  onManualCard={() => void workspace.startManualCard(source.id, chunk.id)}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function ReaderChunkRow({
+  chunk,
+  evidence,
+  active,
+  archived,
+  onFocus,
+  onManualCard
+}: {
+  chunk: SourceChunk;
+  evidence?: ChunkEvidenceSummary;
+  active: boolean;
+  archived: boolean;
+  onFocus: () => void;
+  onManualCard: () => void;
+}) {
+  const status = evidence?.status ?? "uncovered";
+  return (
+    <article className={`min-w-0 rounded-2xl p-3 ${active ? "bg-emerald-50 ring-1 ring-emerald-200" : "bg-zinc-50"}`}>
+      <button type="button" onClick={onFocus} className="block w-full min-w-0 text-left focus:outline-none focus:ring-2 focus:ring-emerald-500">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge>#{chunk.index + 1}</Badge>
+          <span className="text-xs font-semibold text-zinc-500">{chunkStatusLabel(status)}</span>
+          <span className="text-xs text-zinc-500">{evidence?.approvedCardCount ?? 0} 卡 · {evidence?.reviewCount ?? 0} 复习</span>
+        </div>
+        <p className="mt-2 break-words text-sm leading-6 text-zinc-700">{chunk.text.slice(0, 180)}{chunk.text.length > 180 ? "..." : ""}</p>
+      </button>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <SecondaryButton disabled={archived} onClick={onManualCard}>
+          <FileText size={16} /> 用此片段建卡
+        </SecondaryButton>
+      </div>
+    </article>
+  );
+}
+
 function DiagnosticLine({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 rounded-2xl bg-white/75 p-3">
@@ -861,8 +1025,17 @@ function ImportProblemList({ title, problems, danger = false }: { title: string;
 }
 
 function MaterialDetailView({ workspace, sourceId }: { workspace: Workspace; sourceId: string }) {
+  const [readerQuery, setReaderQuery] = useState("");
+  const [focusedChunkId, setFocusedChunkId] = useState("");
   const detail = deriveMaterialDetail(workspace.state, sourceId);
   const source = detail.source;
+  const chunkEvidence = buildChunkEvidenceSummary(detail.chunks, detail.pendingCandidates, detail.approvedCards, detail.reviewLogs);
+  const filteredChunks = detail.chunks.filter((chunk) => {
+    const normalizedQuery = readerQuery.trim().toLowerCase();
+    if (!normalizedQuery) return true;
+    return chunk.text.toLowerCase().includes(normalizedQuery);
+  });
+  const focusedChunk = detail.chunks.find((chunk) => chunk.id === focusedChunkId) ?? filteredChunks[0] ?? detail.chunks[0];
   if (workspace.isLoading) return <SkeletonPanel />;
   if (!source) {
     return (
@@ -931,15 +1104,18 @@ function MaterialDetailView({ workspace, sourceId }: { workspace: Workspace; sou
           {workspace.manualCardForm.isOpen && workspace.manualCardForm.sourceId === source.id ? <ManualCardPanel workspace={workspace} /> : null}
         </Panel>
 
-        <Panel>
-          <SectionHeader title="来源片段" detail="每张候选题和复习卡都必须能回到这里的 chunk。" />
-          <div className="mt-5 grid gap-3">
-            {detail.chunks.length === 0 ? <EmptyState title="没有来源片段" detail="这份材料没有 chunk，不能生成或手工创建可追踪卡片。" /> : null}
-            {detail.chunks.map((chunk) => (
-              <ChunkPanel key={chunk.id} chunk={chunk} disabled={archived} onManualCard={() => void workspace.startManualCard(source.id, chunk.id)} />
-            ))}
-          </div>
-        </Panel>
+        <MaterialReaderWorkbench
+          source={source}
+          chunks={detail.chunks}
+          filteredChunks={filteredChunks}
+          focusedChunk={focusedChunk}
+          chunkEvidence={chunkEvidence}
+          readerQuery={readerQuery}
+          onReaderQueryChange={setReaderQuery}
+          onFocusChunk={setFocusedChunkId}
+          archived={archived}
+          workspace={workspace}
+        />
 
         <Panel>
           <SectionHeader title="候选题审核" detail="这里只显示属于当前材料的候选题。无来源证据时不能批准。" />
@@ -1209,6 +1385,20 @@ function ExplainView({ workspace }: { workspace: Workspace }) {
   const [relation, setRelation] = useState<ConceptRelationType>("causal");
   const [edgeEvidence, setEdgeEvidence] = useState("用一句话说明这条连接的证据。");
   const { state, derived } = workspace;
+
+  useEffect(() => {
+    const rawDraft = window.sessionStorage.getItem("metalearn-explain-draft");
+    if (!rawDraft) return;
+    try {
+      const draft = JSON.parse(rawDraft) as { concept?: string; quote?: string; explanation?: string };
+      if (draft.concept) workspace.setConcept(draft.concept);
+      if (draft.quote) workspace.setExplainQuote(draft.quote);
+      if (draft.explanation) workspace.setExplanation(draft.explanation);
+    } finally {
+      window.sessionStorage.removeItem("metalearn-explain-draft");
+    }
+  }, [workspace]);
+
   return (
     <section className="grid gap-5 xl:grid-cols-[1fr_410px]">
       <Panel>
@@ -1606,27 +1796,6 @@ function ApprovedCardEvidence({ card, chunks }: { card: Card; chunks: SourceChun
   );
 }
 
-function ChunkPanel({ chunk, disabled, onManualCard }: { chunk: SourceChunk; disabled: boolean; onManualCard: () => void }) {
-  const [expanded, setExpanded] = useState(false);
-  const text = expanded ? chunk.text : `${chunk.text.slice(0, 560)}${chunk.text.length > 560 ? "..." : ""}`;
-  return (
-    <article className="min-w-0 rounded-[1.25rem] border border-white/70 bg-white/70 p-4 shadow-sm">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <Badge>片段 #{chunk.index + 1}</Badge>
-          <p className="mt-3 break-words text-sm leading-6 text-zinc-700">{text}</p>
-        </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
-          {chunk.text.length > 560 ? <SecondaryButton onClick={() => setExpanded((current) => !current)}>{expanded ? "收起" : "展开"}</SecondaryButton> : null}
-          <Button disabled={disabled} onClick={onManualCard}>
-            <FileText size={16} /> 用此片段建卡
-          </Button>
-        </div>
-      </div>
-    </article>
-  );
-}
-
 function MaterialStat({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-2xl bg-zinc-50 p-4">
@@ -1681,6 +1850,74 @@ function stageLabel(stage: MaterialImportDraft["stage"]): string {
     failed: "流程失败"
   };
   return labels[stage];
+}
+
+function buildChunkEvidenceSummary(chunks: SourceChunk[], candidates: CardCandidate[], cards: Card[], logs: ReviewLog[]) {
+  const summaries = new Map<string, ChunkEvidenceSummary>();
+  const cardsById = new Map(cards.map((card) => [card.id, card]));
+  for (const chunk of chunks) {
+    summaries.set(chunk.id, {
+      chunkId: chunk.id,
+      candidateCount: 0,
+      approvedCardCount: 0,
+      reviewCount: 0,
+      status: "uncovered"
+    });
+  }
+  for (const candidate of candidates) {
+    const summary = summaries.get(candidate.sourceChunkId);
+    if (summary) summary.candidateCount += 1;
+  }
+  for (const card of cards) {
+    const summary = summaries.get(card.sourceChunkId);
+    if (summary) summary.approvedCardCount += 1;
+  }
+  for (const log of logs) {
+    const card = cardsById.get(log.cardId);
+    const summary = card ? summaries.get(card.sourceChunkId) : undefined;
+    if (summary) summary.reviewCount += 1;
+  }
+  for (const summary of summaries.values()) {
+    summary.status = summary.reviewCount > 0 ? "reviewed" : summary.approvedCardCount > 0 ? "carded" : summary.candidateCount > 0 ? "candidate" : "uncovered";
+  }
+  return summaries;
+}
+
+function chunkStatusLabel(status: ChunkEvidenceSummary["status"]) {
+  const labels: Record<ChunkEvidenceSummary["status"], string> = {
+    uncovered: "未覆盖",
+    candidate: "有候选题",
+    carded: "已成卡",
+    reviewed: "已复习"
+  };
+  return labels[status];
+}
+
+function chunkCoverageClass(status: ChunkEvidenceSummary["status"], active: boolean) {
+  const base = active ? "ring-2 ring-emerald-700 " : "";
+  const classes: Record<ChunkEvidenceSummary["status"], string> = {
+    uncovered: "border-zinc-200 bg-white text-zinc-500",
+    candidate: "border-amber-200 bg-amber-100 text-amber-900",
+    carded: "border-emerald-200 bg-emerald-100 text-emerald-900",
+    reviewed: "border-emerald-700 bg-emerald-800 text-white"
+  };
+  return `${base}${classes[status]}`;
+}
+
+function openChunkInExplain(source: SourceDocument, chunk: SourceChunk) {
+  window.sessionStorage.setItem(
+    "metalearn-explain-draft",
+    JSON.stringify({
+      concept: source.title,
+      quote: buildChunkSourceQuote(chunk),
+      explanation: "请根据这个来源片段，用自己的话解释概念、机制、例子和边界。"
+    })
+  );
+  window.location.href = "/explain";
+}
+
+function buildChunkSourceQuote(chunk: SourceChunk): string {
+  return chunk.text.replace(/\s+/g, " ").trim().slice(0, 260);
 }
 
 function nextActionLabel(action: CandidateGenerationDiagnostic["nextAction"]): string {

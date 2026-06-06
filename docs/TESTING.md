@@ -61,6 +61,7 @@ Important integration paths:
 
 - import material -> chunk -> preview -> candidates;
 - file selection -> text preview -> save and generate -> upload preview -> candidate review bench;
+- material detail -> reader workbench -> focused chunk -> manual card or Feynman explanation handoff;
 - failed AI candidate generation -> saved material remains available -> manual card creation;
 - edit candidate -> approve -> review queue;
 - high-confidence error -> mistake reason -> explanation repair;
@@ -84,6 +85,7 @@ Desktop and mobile should cover:
 - review with confidence prediction;
 - strict review state machine and keyboard shortcuts;
 - home study mode launcher and global command palette navigation;
+- material reader workbench, evidence coverage map, and source-to-Feynman handoff;
 - high-confidence error repair task visibility;
 - Feynman questions and explanation save;
 - insight and privacy copy;

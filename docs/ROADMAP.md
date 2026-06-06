@@ -131,6 +131,28 @@ Design principles:
 - keep source-grounded workflows visible;
 - do not introduce cloud accounts, public sharing, social features, or unsupported learning claims as polish.
 
+## v0.3.3 - Material Reader Workbench
+
+Status: implemented patch.
+
+Goal: make each material page behave like a source-centered learning workspace instead of a passive chunk list.
+
+Included:
+
+- material reader workbench on `/library/[sourceId]`;
+- chunk search and focused chunk reading area;
+- evidence coverage map showing whether each chunk is uncovered, candidate-backed, card-backed, or reviewed;
+- per-chunk counts for candidates, approved cards, and review evidence;
+- quick actions from focused source evidence into manual card creation and Feynman explanation;
+- local-only handoff to Feynman explanation through browser session state, without uploading material;
+- E2E coverage for source reader visibility and source-to-Feynman handoff.
+
+Design principles:
+
+- prioritize source context over disconnected flashcards;
+- make weak/uncovered source areas visible so users know where to act next;
+- keep every AI-adjacent action reviewable and reversible.
+
 ## v0.4.0 - Explanation Versions and Insight Quality
 
 Goal: make Feynman explanations and insights evidence-driven.

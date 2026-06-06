@@ -46,6 +46,7 @@ Implemented:
 - text and Markdown paste or file import, plus selectable text-layer PDF file extraction;
 - visible material import stages, text-quality checks, and candidate-generation diagnostics;
 - automatic chunking;
+- material reader workbench with chunk focus, evidence coverage, and source-to-card actions;
 - AI upload preview before any generation request;
 - local mock AI provider by default;
 - source-grounded candidate card generation;

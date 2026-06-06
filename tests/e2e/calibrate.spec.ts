@@ -171,7 +171,7 @@ test("MetaLearn OS imports a Markdown material file locally", async ({ page }) =
   await expect(page.getByText(/已导入并分成/)).toBeVisible();
   await page.getByRole("link", { name: "retrieval-notes" }).click();
   await expect(page.getByRole("heading", { name: "retrieval-notes" })).toBeVisible();
-  await expect(page.getByRole("article").getByText("Markdown files can be selected directly", { exact: false })).toBeVisible();
+  await expect(page.getByText("Markdown files can be selected directly", { exact: false }).first()).toBeVisible();
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
@@ -250,8 +250,10 @@ test("MetaLearn OS creates a review card manually from material evidence", async
   const materialUrl = page.url();
 
   await expect(page.getByRole("heading", { name: "我的学习材料" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "来源片段" })).toBeVisible();
-  await expect(page.getByText("复习证据")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "阅读工作台" })).toBeVisible();
+  await expect(page.getByText("证据覆盖", { exact: true })).toBeVisible();
+  await expect(page.getByText("聚焦片段", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "复习证据" })).toBeVisible();
   await page.getByRole("button", { name: /用此片段建卡/ }).first().click();
   await expect(page.getByText("从来源证据建卡")).toBeVisible();
   await expect(page.getByText("将发送哪些内容")).not.toBeVisible();
@@ -271,10 +273,27 @@ test("MetaLearn OS creates a review card manually from material evidence", async
   await expect(page.getByText(/校准差距/)).toBeVisible();
 
   await page.goto(materialUrl);
-  await expect(page.getByText("复习证据")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "复习证据" })).toBeVisible();
   await expect(page.getByText(/信心 5/)).toBeVisible();
   await expect(page.getByText("来源缺失，需要修复")).not.toBeVisible();
   expect(aiCardCalls).toBe(0);
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+});
+
+test("MetaLearn OS opens a Feynman draft from focused source evidence", async ({ page }) => {
+  await page.goto("/library");
+  await page.getByRole("button", { name: "仅保存到资料库", exact: true }).click();
+  await expect(page.getByText(/已导入并分成/)).toBeVisible();
+  await page.getByRole("link", { name: "我的学习材料" }).click();
+
+  await expect(page.getByRole("heading", { name: "阅读工作台" })).toBeVisible();
+  await page.getByRole("button", { name: /用当前片段解释/ }).click();
+  await expect(page).toHaveURL(/\/explain/);
+  await expect(page.getByRole("heading", { name: "费曼解释" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "概念", exact: true })).toHaveValue("我的学习材料");
+  await expect(page.getByRole("textbox", { name: "可选来源片段", exact: true })).toHaveValue(/间隔效应说明/);
 
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
