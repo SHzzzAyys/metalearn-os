@@ -27,7 +27,7 @@ The active app is `apps/metalearn-os`, a unified product with six workspaces:
 - `校准记忆`: confidence prediction, active answer, self-rating, source reveal, calibration gap, and review scheduling.
 - `费曼解释`: explanation attempts, three Socratic questions, rubric scores, version history, gap tags, concept nodes, and card handoff.
 - `学习罗盘`: 60-second plan, low-frequency check-ins, 2-minute reflection, prediction-vs-actual tracking, and deterministic daily advice.
-- `洞察报告`: Brier score, overconfidence, high-confidence error rate, passive-learning risk, weak tags, tag-level overconfidence, and explanation gap types.
+- `洞察报告`: Brier score, calibration evidence thresholds, reliability curve, Brier trend, overconfidence, high-confidence error rate, passive-learning risk, weak tags, tag-level overconfidence, and explanation gap types.
 - `设置与隐私`: local AI mode, export/restore boundaries, CSV/Anki download, privacy contract, and local data deletion.
 
 The older three apps are retained as legacy module references:
@@ -65,6 +65,7 @@ Implemented:
 - lightweight learning sessions, check-ins, reflections, and prediction bias;
 - insight snapshots and deterministic recommendations;
 - insight action cards that link evidence gaps back to review, repair, candidate approval, explanation, or material reading;
+- evidence-thresholded calibration insights with Brier trend and confidence reliability buckets;
 - JSON export and restore package with manifest, local preflight validation, and conflict handling;
 - CSV and Anki TSV export;
 - one-step data export and two-step local deletion;

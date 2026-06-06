@@ -190,14 +190,16 @@ Implemented:
 - resolved and newly introduced gap tags across versions;
 - text-change signals for newly added mechanism, example, boundary, contrast, or counterexample language;
 - deterministic insight action cards on `/insights` that link back to review, mistake repair, candidate approval, explanation revision, or active material reading;
-- unit coverage for explanation threads and insight action priority.
+- calibration evidence thresholds that label insufficient review data before showing trend or reliability conclusions;
+- Brier trend by review date and confidence reliability buckets on `/insights`;
+- unit coverage for explanation threads, insight action priority, calibration trend, reliability bucket status, and evidence thresholds.
 
 Planned work:
 
 - strengthen concept nodes and confirmed concept edges;
 - generate remedial candidates from explanation gap tags;
-- improve Brier trend, reliability curve, tag overconfidence, and gap distribution charts;
-- add explicit "not enough evidence" thresholds to each insight;
+- improve tag overconfidence and gap distribution charts;
+- add scoped "not enough evidence" thresholds to tag, material, and concept-level insights;
 - deepen action links with scoped filters for material, tag, and concept.
 
 Acceptance criteria:

@@ -51,6 +51,9 @@ High-value unit tests should cover:
 - explanation gap summaries;
 - explanation version thread deltas for rubric changes, resolved/new gap tags, and text-change signals;
 - insight action priority for repair, review, candidate approval, explanation revision, material reading, and insufficient evidence;
+- calibration trend grouping by review date;
+- confidence reliability bucket status: `empty`, `thin`, and `enough`;
+- insight evidence thresholds that prevent thin review data from being treated as stable conclusions;
 - export manifest shape;
 - import package parse and schema rejection;
 - import preview warnings, repairable issues, and fatal problems;
@@ -95,6 +98,7 @@ Desktop and mobile should cover:
 - high-confidence error repair task visibility;
 - Feynman questions and explanation save;
 - explanation version evidence card and insight action cards;
+- calibration evidence quality, confidence reliability curve, and Brier trend visibility on `/insights`;
 - insight and privacy copy;
 - JSON restore preview and import report;
 - invalid JSON and fatal import problems;

@@ -71,6 +71,9 @@ test("MetaLearn OS completes the unified learning loop", async ({ page }) => {
   await page.goto("/insights");
   await expect(page.getByRole("heading", { name: "洞察报告" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "校准报告" })).toBeVisible();
+  await expect(page.getByText("校准证据质量", { exact: true })).toBeVisible();
+  await expect(page.getByText("信心可靠性曲线", { exact: true })).toBeVisible();
+  await expect(page.getByText("Brier 趋势", { exact: true })).toBeVisible();
   await expect(page.getByText("下一步行动", { exact: true })).toBeVisible();
 
   await page.goto("/settings");
@@ -394,6 +397,9 @@ test("MetaLearn OS creates and resolves high-confidence repair tasks", async ({ 
 
   await page.goto("/insights");
   await expect(page.getByText("未解决高信心错误任务：0")).toBeVisible();
+  await expect(page.getByText("校准证据质量", { exact: true })).toBeVisible();
+  await expect(page.getByText("信心可靠性曲线", { exact: true })).toBeVisible();
+  await expect(page.getByText("Brier 趋势", { exact: true })).toBeVisible();
   await expect(page.getByText("下一步行动", { exact: true })).toBeVisible();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);

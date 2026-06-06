@@ -5,10 +5,13 @@ import {
   buildChunkRecallPrompts,
   buildRepairTaskSummary,
   deriveActiveReadingTrack,
+  deriveCalibrationTrend,
   deriveChunkEvidenceSummaries,
   deriveExplanationThreads,
+  deriveInsightEvidenceThresholds,
   deriveInsightActions,
   deriveMaterialDetail,
+  deriveReliabilityEvidence,
   type WorkspaceState
 } from "../apps/metalearn-os/app/workspace-selectors";
 
@@ -221,6 +224,49 @@ describe("explanation thread selector", () => {
     expect(threads[0].latest.newGapTags).toEqual(["contrast"]);
     expect(threads[0].latest.textDelta.addedSignals).toContain("例子");
     expect(threads[0].latest.textDelta.addedSignals).toContain("边界");
+  });
+});
+
+describe("calibration insight evidence selectors", () => {
+  const logs: ReviewLog[] = [
+    { ...reviewA, id: "review_1", confidence: 5, confidenceProbability: 0.9, isCorrect: false, outcome: "again", createdAt: "2026-06-01T09:00:00.000Z" },
+    { ...reviewA, id: "review_2", confidence: 5, confidenceProbability: 0.9, isCorrect: true, outcome: "correct", createdAt: "2026-06-01T10:00:00.000Z" },
+    { ...reviewA, id: "review_3", confidence: 5, confidenceProbability: 0.9, isCorrect: false, outcome: "again", createdAt: "2026-06-01T11:00:00.000Z" },
+    { ...reviewA, id: "review_4", confidence: 3, confidenceProbability: 0.5, isCorrect: true, outcome: "correct", createdAt: "2026-06-02T09:00:00.000Z" },
+    { ...reviewA, id: "review_5", confidence: 3, confidenceProbability: 0.5, isCorrect: false, outcome: "again", createdAt: "2026-06-02T10:00:00.000Z" },
+    { ...reviewA, id: "review_6", confidence: 3, confidenceProbability: 0.5, isCorrect: true, outcome: "correct", createdAt: "2026-06-02T11:00:00.000Z" },
+    { ...reviewA, id: "review_7", confidence: 4, confidenceProbability: 0.7, isCorrect: true, outcome: "correct", createdAt: "2026-06-03T09:00:00.000Z" },
+    { ...reviewA, id: "review_8", confidence: 4, confidenceProbability: 0.7, isCorrect: true, outcome: "correct", createdAt: "2026-06-03T10:00:00.000Z" }
+  ];
+
+  it("groups Brier trend by review date", () => {
+    const trend = deriveCalibrationTrend(logs);
+
+    expect(trend.map((point) => point.date)).toEqual(["2026-06-01", "2026-06-02", "2026-06-03"]);
+    expect(trend[0].reviewCount).toBe(3);
+    expect(trend[0].highConfidenceErrorRate).toBeCloseTo(0.667, 3);
+    expect(trend[1].accuracy).toBeCloseTo(0.667, 3);
+  });
+
+  it("marks reliability buckets as empty, thin, or enough", () => {
+    const reliability = deriveReliabilityEvidence(logs);
+
+    expect(reliability.find((bucket) => bucket.confidence === 5)?.status).toBe("enough");
+    expect(reliability.find((bucket) => bucket.confidence === 4)?.status).toBe("thin");
+    expect(reliability.find((bucket) => bucket.confidence === 2)?.status).toBe("empty");
+    expect(reliability.find((bucket) => bucket.confidence === 5)?.gap).toBeLessThan(0);
+  });
+
+  it("requires enough evidence before treating trends and reliability as readable", () => {
+    const thinThresholds = deriveInsightEvidenceThresholds([reviewA]);
+    const enoughThresholds = deriveInsightEvidenceThresholds(logs);
+
+    expect(thinThresholds.enoughForTrend).toBe(false);
+    expect(thinThresholds.enoughForReliability).toBe(false);
+    expect(thinThresholds.message).toContain("证据不足");
+    expect(enoughThresholds.enoughForTrend).toBe(true);
+    expect(enoughThresholds.enoughForReliability).toBe(true);
+    expect(enoughThresholds.reliabilityEnoughBucketCount).toBe(2);
   });
 });
 

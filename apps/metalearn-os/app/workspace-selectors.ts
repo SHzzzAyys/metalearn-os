@@ -18,6 +18,7 @@ import type {
 } from "@metalearn/core";
 import {
   buildDailyPlan,
+  buildCalibrationBuckets,
   buildReviewQueue,
   calculateBrierScore,
   calculateHighConfidenceErrorRate,
@@ -125,6 +126,9 @@ export function deriveWorkspace(input: { state: WorkspaceState; now: Date; nowMs
     explanationThreads,
     sources: state.sources
   });
+  const calibrationTrend = deriveCalibrationTrend(state.logs);
+  const reliabilityEvidence = deriveReliabilityEvidence(state.logs);
+  const insightEvidenceThresholds = deriveInsightEvidenceThresholds(state.logs, calibrationTrend, reliabilityEvidence);
   const latestPreview = state.aiRequestPreviews[0];
   return {
     pendingCandidates,
@@ -139,6 +143,9 @@ export function deriveWorkspace(input: { state: WorkspaceState; now: Date; nowMs
     explanationGapTags,
     explanationThreads,
     insightActions,
+    calibrationTrend,
+    reliabilityEvidence,
+    insightEvidenceThresholds,
     latestPreview,
     repairTaskSummary,
     modules: buildModules(dueCards.length, pendingCandidates.length, repairTaskSummary.openCount),
@@ -214,6 +221,107 @@ export interface InsightAction {
   href: string;
   priority: "high" | "medium" | "low";
   evidenceLabel: string;
+}
+
+export type CalibrationEvidenceStatus = "empty" | "thin" | "enough";
+
+export interface CalibrationTrendPoint {
+  date: string;
+  reviewCount: number;
+  brierScore: number;
+  highConfidenceErrorRate: number;
+  accuracy: number;
+  averageConfidence: number;
+}
+
+export interface ReliabilityBucketEvidence {
+  confidence: 1 | 2 | 3 | 4 | 5;
+  expected: number;
+  actual: number;
+  count: number;
+  gap: number;
+  status: CalibrationEvidenceStatus;
+}
+
+export interface InsightEvidenceThresholds {
+  reviewCount: number;
+  trendPointCount: number;
+  trendMinimumReviews: number;
+  trendMinimumDays: number;
+  reliabilityMinimumPerBucket: number;
+  reliabilityEnoughBucketCount: number;
+  reliabilityMinimumEnoughBuckets: number;
+  enoughForTrend: boolean;
+  enoughForReliability: boolean;
+  message: string;
+}
+
+export function deriveCalibrationTrend(logs: ReviewLog[], maxPoints = 7): CalibrationTrendPoint[] {
+  const grouped = new Map<string, ReviewLog[]>();
+  for (const log of logs) {
+    const dateKey = normalizeLogDate(log.createdAt);
+    grouped.set(dateKey, [...(grouped.get(dateKey) ?? []), log]);
+  }
+
+  return [...grouped.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .slice(-maxPoints)
+    .map(([date, dateLogs]) => {
+      const correctCount = dateLogs.filter((log) => log.isCorrect).length;
+      const averageConfidence = dateLogs.reduce((sum, log) => sum + log.confidenceProbability, 0) / dateLogs.length;
+      return {
+        date,
+        reviewCount: dateLogs.length,
+        brierScore: calculateBrierScore(dateLogs),
+        highConfidenceErrorRate: calculateHighConfidenceErrorRate(dateLogs),
+        accuracy: roundThree(correctCount / dateLogs.length),
+        averageConfidence: roundThree(averageConfidence)
+      };
+    });
+}
+
+export function deriveReliabilityEvidence(logs: ReviewLog[]): ReliabilityBucketEvidence[] {
+  return buildCalibrationBuckets(logs).map((bucket) => ({
+    ...bucket,
+    gap: roundThree(bucket.actual - bucket.expected),
+    status: bucket.count === 0 ? "empty" : bucket.count < 3 ? "thin" : "enough"
+  }));
+}
+
+export function deriveInsightEvidenceThresholds(
+  logs: ReviewLog[],
+  trend = deriveCalibrationTrend(logs),
+  reliability = deriveReliabilityEvidence(logs)
+): InsightEvidenceThresholds {
+  const trendMinimumReviews = 5;
+  const trendMinimumDays = 2;
+  const reliabilityMinimumPerBucket = 3;
+  const reliabilityMinimumEnoughBuckets = 2;
+  const reliabilityEnoughBucketCount = reliability.filter((bucket) => bucket.status === "enough").length;
+  const enoughForTrend = logs.length >= trendMinimumReviews && trend.length >= trendMinimumDays;
+  const enoughForReliability = logs.length >= 8 && reliabilityEnoughBucketCount >= reliabilityMinimumEnoughBuckets;
+
+  let message = "已有初步校准证据，可以观察趋势；仍应继续积累不同材料和不同信心档的复习记录。";
+  if (logs.length === 0) {
+    message = "还没有复习证据。先完成至少 5 次带信心预测的主动提取，再生成趋势判断。";
+  } else if (!enoughForTrend && !enoughForReliability) {
+    message = `证据不足：目前 ${logs.length} 次复习。趋势至少需要 ${trendMinimumReviews} 次且覆盖 ${trendMinimumDays} 天；可靠性曲线至少需要 ${reliabilityMinimumEnoughBuckets} 个信心档各 ${reliabilityMinimumPerBucket} 次。`;
+  } else if (!enoughForReliability) {
+    message = `趋势可以初步观察，但可靠性曲线仍偏薄：目前只有 ${reliabilityEnoughBucketCount} 个信心档达到 ${reliabilityMinimumPerBucket} 次样本。`;
+  }
+
+  return {
+    reviewCount: logs.length,
+    trendPointCount: trend.length,
+    trendMinimumReviews,
+    trendMinimumDays,
+    reliabilityMinimumPerBucket,
+    reliabilityEnoughBucketCount,
+    reliabilityMinimumEnoughBuckets,
+    enoughForTrend,
+    enoughForReliability,
+    message
+  };
 }
 
 export function deriveMaterialDetail(state: WorkspaceState, sourceId: string) {
@@ -568,6 +676,16 @@ function averageRubricScore(scores: ExplanationAttempt["rubricScores"]): number 
 
 function roundOne(value: number): number {
   return Math.round(value * 10) / 10;
+}
+
+function roundThree(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+function normalizeLogDate(value: string): string {
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) return value.slice(0, 10) || "unknown";
+  return new Date(timestamp).toISOString().slice(0, 10);
 }
 
 function normalizeExplanationText(value: string): string {

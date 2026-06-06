@@ -44,7 +44,6 @@ import type {
   SourceInputType
 } from "@metalearn/core";
 import { learningTemplates } from "@metalearn/core";
-import { buildCalibrationBuckets } from "@metalearn/learning-science";
 import { validateCardCandidateEvidence } from "@metalearn/storage";
 import type { StudyAsset } from "@metalearn/core";
 import {
@@ -1729,8 +1728,9 @@ function CompassView({ workspace }: { workspace: Workspace }) {
 }
 
 function InsightsView({ workspace }: { workspace: Workspace }) {
-  const { derived, state } = workspace;
-  const buckets = buildCalibrationBuckets(state.logs);
+  const { derived } = workspace;
+  const thresholds = derived.insightEvidenceThresholds;
+  const hasReviewEvidence = thresholds.reviewCount > 0;
   return (
     <section className="grid gap-5 xl:grid-cols-[1fr_390px]">
       <Panel>
@@ -1744,10 +1744,28 @@ function InsightsView({ workspace }: { workspace: Workspace }) {
           </Button>
         </div>
         <div className="mt-6 grid gap-4 md:grid-cols-2">
-          <ProgressRing value={Math.max(0, 1 - derived.insight.brierScore)} label={`Brier ${derived.insight.brierScore.toFixed(3)}`} />
-          <ProgressRing value={1 - Math.max(0, derived.insight.overconfidenceIndex)} label={`过度自信 ${Math.round(derived.insight.overconfidenceIndex * 100)}%`} />
-          <ProgressRing value={1 - derived.insight.highConfidenceErrorRate} label={`高信心错误 ${Math.round(derived.insight.highConfidenceErrorRate * 100)}%`} />
+          <ProgressRing value={hasReviewEvidence ? Math.max(0, 1 - derived.insight.brierScore) : 0} label={hasReviewEvidence ? `Brier ${derived.insight.brierScore.toFixed(3)}` : "Brier 证据不足"} />
+          <ProgressRing value={hasReviewEvidence ? 1 - Math.max(0, derived.insight.overconfidenceIndex) : 0} label={hasReviewEvidence ? `过度自信 ${Math.round(derived.insight.overconfidenceIndex * 100)}%` : "过度自信 证据不足"} />
+          <ProgressRing value={hasReviewEvidence ? 1 - derived.insight.highConfidenceErrorRate : 0} label={hasReviewEvidence ? `高信心错误 ${Math.round(derived.insight.highConfidenceErrorRate * 100)}%` : "高信心错误 证据不足"} />
           <ProgressRing value={1 - derived.insight.passiveLearningRisk} label={`被动学习风险 ${Math.round(derived.insight.passiveLearningRisk * 100)}%`} />
+        </div>
+        <div className="mt-6 rounded-[1.25rem] border border-zinc-200 bg-zinc-50/80 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-zinc-950">校准证据质量</p>
+              <p className="mt-1 text-sm leading-6 text-zinc-600">{thresholds.message}</p>
+            </div>
+            <Badge>{thresholds.enoughForTrend && thresholds.enoughForReliability ? "可初步判断" : "证据不足"}</Badge>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <EvidenceMetric label="复习证据" value={`${thresholds.reviewCount} 次`} detail={`趋势最低 ${thresholds.trendMinimumReviews} 次`} />
+            <EvidenceMetric label="覆盖天数" value={`${thresholds.trendPointCount} 天`} detail={`趋势最低 ${thresholds.trendMinimumDays} 天`} />
+            <EvidenceMetric label="可靠信心档" value={`${thresholds.reliabilityEnoughBucketCount} 档`} detail={`每档至少 ${thresholds.reliabilityMinimumPerBucket} 次`} />
+          </div>
+        </div>
+        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+          <ReliabilityEvidencePanel reliability={derived.reliabilityEvidence} enough={thresholds.enoughForReliability} />
+          <CalibrationTrendPanel trend={derived.calibrationTrend} enough={thresholds.enoughForTrend} />
         </div>
         <div className="mt-6 rounded-[1.25rem] border border-emerald-100 bg-emerald-50/55 p-4">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -1767,19 +1785,6 @@ function InsightsView({ workspace }: { workspace: Workspace }) {
           <p className="font-semibold">未解决高信心错误任务：{derived.repairTaskSummary.unresolvedCount}</p>
           <p className="mt-1">任务关闭只表示修复动作完成，不表示系统判定你已经掌握。</p>
           {derived.repairTaskSummary.unresolvedCount > 0 ? <TextLink href="/review/mistakes">查看修复任务</TextLink> : <span className="text-rose-800">当前没有待修复任务。</span>}
-        </div>
-        <div className="mt-6 grid gap-3">
-          {buckets.map((bucket) => (
-            <div key={bucket.confidence}>
-              <div className="flex justify-between text-xs text-zinc-500">
-                <span>信心 {bucket.confidence}</span>
-                <span>期望 {Math.round(bucket.expected * 100)}% / 实际 {Math.round(bucket.actual * 100)}% / {bucket.count} 次</span>
-              </div>
-              <div className="mt-1 h-2 rounded-full bg-zinc-200">
-                <div className="h-2 rounded-full bg-emerald-600" style={{ width: `${Math.max(4, bucket.actual * 100)}%` }} />
-              </div>
-            </div>
-          ))}
         </div>
       </Panel>
       <Panel>
@@ -1808,6 +1813,92 @@ function InsightsView({ workspace }: { workspace: Workspace }) {
       </Panel>
     </section>
   );
+}
+
+function EvidenceMetric({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <div className="min-w-0 border-t border-zinc-200 pt-3">
+      <p className="text-xs font-medium text-zinc-500">{label}</p>
+      <p className="mt-1 break-words text-xl font-semibold tracking-[-0.02em] text-zinc-950">{value}</p>
+      <p className="mt-1 break-words text-xs leading-5 text-zinc-500">{detail}</p>
+    </div>
+  );
+}
+
+function ReliabilityEvidencePanel({ reliability, enough }: { reliability: Workspace["derived"]["reliabilityEvidence"]; enough: boolean }) {
+  return (
+    <section className="min-w-0 rounded-[1.25rem] border border-zinc-200 bg-white/70 p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-zinc-950">信心可靠性曲线</p>
+          <p className="mt-1 text-sm leading-6 text-zinc-600">对比每档信心的期望正确率和实际正确率；样本薄弱时只作提醒。</p>
+        </div>
+        <Badge>{enough ? "样本可读" : "样本偏薄"}</Badge>
+      </div>
+      <div className="mt-4 grid gap-4">
+        {reliability.map((bucket) => (
+          <div key={bucket.confidence} className="min-w-0">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-500">
+              <span className="font-medium text-zinc-700">信心 {bucket.confidence}</span>
+              <span>{formatPercent(bucket.expected)} 期望 / {formatPercent(bucket.actual)} 实际 / {bucket.count} 次</span>
+            </div>
+            <div className="mt-2 grid gap-1">
+              <div className="h-2 rounded-full bg-zinc-200">
+                <div className="h-2 rounded-full bg-zinc-400" style={{ width: `${bucket.expected * 100}%` }} />
+              </div>
+              <div className="h-2 rounded-full bg-zinc-200">
+                <div className="h-2 rounded-full bg-emerald-600" style={{ width: `${bucket.count === 0 ? 0 : Math.max(3, bucket.actual * 100)}%` }} />
+              </div>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+              <CalibrationStatusBadge status={bucket.status} />
+              <span className={bucket.gap > 0 ? "text-emerald-700" : bucket.gap < 0 ? "text-rose-700" : "text-zinc-500"}>
+                差距 {bucket.gap > 0 ? "+" : ""}{formatPercent(bucket.gap)}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CalibrationTrendPanel({ trend, enough }: { trend: Workspace["derived"]["calibrationTrend"]; enough: boolean }) {
+  return (
+    <section className="min-w-0 rounded-[1.25rem] border border-zinc-200 bg-white/70 p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-zinc-950">Brier 趋势</p>
+          <p className="mt-1 text-sm leading-6 text-zinc-600">Brier 越低越好；这里按复习日期聚合，避免把全部记录压成一个总分。</p>
+        </div>
+        <Badge>{enough ? "趋势可读" : "证据不足"}</Badge>
+      </div>
+      <div className="mt-4 grid gap-3">
+        {trend.length === 0 ? <EmptyState title="还没有趋势" detail="完成校准复习后才会出现按日期聚合的 Brier 记录。" /> : null}
+        {trend.map((point) => (
+          <div key={point.date} className="min-w-0">
+            <div className="flex flex-wrap justify-between gap-2 text-xs text-zinc-500">
+              <span className="font-medium text-zinc-700">{point.date}</span>
+              <span>Brier {point.brierScore.toFixed(3)} · {point.reviewCount} 次 · 正确率 {formatPercent(point.accuracy)}</span>
+            </div>
+            <div className="mt-1 h-2 rounded-full bg-zinc-200">
+              <div className="h-2 rounded-full bg-emerald-600" style={{ width: `${Math.max(3, Math.max(0, 1 - point.brierScore) * 100)}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CalibrationStatusBadge({ status }: { status: Workspace["derived"]["reliabilityEvidence"][number]["status"] }) {
+  const label = status === "enough" ? "样本足够" : status === "thin" ? "样本薄弱" : "暂无样本";
+  const tone = status === "enough" ? "bg-emerald-50 text-emerald-800" : status === "thin" ? "bg-amber-50 text-amber-800" : "bg-zinc-100 text-zinc-600";
+  return <span className={`rounded-full px-2 py-1 font-medium ${tone}`}>{label}</span>;
+}
+
+function formatPercent(value: number): string {
+  return `${Math.round(value * 100)}%`;
 }
 
 function InsightActionCard({ action }: { action: Workspace["derived"]["insightActions"][number] }) {

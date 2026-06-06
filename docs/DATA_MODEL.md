@@ -36,6 +36,13 @@ Insight and AI boundary:
 - `aiRequestPreviews`: preview, confirmation, completion, and failure records for AI requests.
 - `learningEvents`: shared event log across modules.
 
+Derived insight evidence:
+
+- `calibrationTrend`: date-level Brier score, review count, high-confidence error rate, accuracy, and average confidence.
+- `reliabilityEvidence`: five confidence buckets with expected correctness, actual correctness, sample count, gap, and `empty | thin | enough` status.
+- `insightEvidenceThresholds`: local evidence gates for trend and reliability readability. These are derived from review logs and are not stored in IndexedDB.
+- Thin evidence must be shown as thin evidence. The UI must not present empty or one-sample metrics as stable learning conclusions.
+
 ## Source Traceability
 
 Approved cards must be traceable.
