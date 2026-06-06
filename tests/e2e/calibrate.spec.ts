@@ -37,6 +37,7 @@ test("MetaLearn OS completes the unified learning loop", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "今天该做什么" })).toBeVisible();
   await expect(page.getByText("北极星指标")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "继续学习视图" })).toBeVisible();
 
   await page.goto("/library");
   await expect(page.getByRole("heading", { name: "资料库" })).toBeVisible();

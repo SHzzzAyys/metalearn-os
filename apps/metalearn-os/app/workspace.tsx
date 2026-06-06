@@ -538,7 +538,40 @@ function StudyModeLauncher({ workspace }: { workspace: Workspace }) {
           </a>
         ))}
       </div>
+      <div className="mt-6 border-t border-zinc-100 pt-5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h3 className="text-xl font-semibold tracking-[-0.02em]">继续学习视图</h3>
+            <p className="mt-1 text-sm leading-6 text-zinc-600">从洞察里提炼出的轻量 filtered views：按错误、到期、材料、tag 或概念继续。</p>
+          </div>
+          <TextLink href="/insights">查看洞察</TextLink>
+        </div>
+        <div className="mt-4 grid gap-2 md:grid-cols-2">
+          {derived.studyViews.map((view) => (
+            <StudyViewLink key={view.id} view={view} />
+          ))}
+        </div>
+      </div>
     </div>
+  );
+}
+
+function StudyViewLink({ view }: { view: Workspace["derived"]["studyViews"][number] }) {
+  const tone =
+    view.priority === "high"
+      ? "border-rose-100 bg-rose-50/70 text-rose-950"
+      : view.priority === "medium"
+        ? "border-amber-100 bg-amber-50/70 text-amber-950"
+        : "border-zinc-100 bg-white/70 text-zinc-800";
+  return (
+    <a href={view.href} className={`min-w-0 rounded-2xl border p-3 transition hover:-translate-y-0.5 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 ${tone}`}>
+      <div className="flex flex-wrap gap-2">
+        <Badge>{view.scopeLabel}</Badge>
+        <Badge>{view.metric}</Badge>
+      </div>
+      <p className="mt-2 break-words text-sm font-semibold">{view.title}</p>
+      <p className="mt-1 break-words text-xs leading-5 opacity-80">{view.detail}</p>
+    </a>
   );
 }
 

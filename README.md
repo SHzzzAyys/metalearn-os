@@ -68,6 +68,7 @@ Implemented:
 - evidence-thresholded calibration insights with Brier trend and confidence reliability buckets;
 - scoped insight drilldowns for materials, tags, and concepts, each with evidence status and an action link;
 - query-scoped library and review flows for tag/material links from insights;
+- home study views that surface the next useful repair, due-review, candidate, material, tag, or concept scope;
 - JSON export and restore package with manifest, local preflight validation, and conflict handling;
 - CSV and Anki TSV export;
 - one-step data export and two-step local deletion;

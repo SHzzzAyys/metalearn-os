@@ -13,6 +13,7 @@ import {
   deriveMaterialDetail,
   deriveReliabilityEvidence,
   deriveScopedInsights,
+  deriveStudyViews,
   type WorkspaceState
 } from "../apps/metalearn-os/app/workspace-selectors";
 
@@ -316,6 +317,38 @@ describe("scoped insight selectors", () => {
     expect(insights.concepts[0].status).toBe("thin");
     expect(insights.concepts[0].href).toBe("/explain?concept=spacing");
     expect(insights.concepts[0].summary).toContain("v2");
+  });
+
+  it("builds study views from repair, review, candidate, and scoped evidence", () => {
+    const repairTask: RepairTask = {
+      id: "repair_1",
+      reviewLogId: "review_a",
+      cardId: "card_a",
+      sourceId: "source_a",
+      sourceChunkId: "chunk_a",
+      status: "open",
+      reason: "not_retrieved",
+      confidence: 5,
+      outcome: "again",
+      tagSnapshot: ["course", "spacing"],
+      createdAt: "2026-06-01T00:00:00.000Z",
+      updatedAt: "2026-06-01T00:00:00.000Z",
+      linkedRemedialCandidateIds: []
+    };
+    const scopedInsights = deriveScopedInsights(workspaceState({ repairTasks: [repairTask] }));
+    const views = deriveStudyViews({
+      dueCards: [cardA],
+      pendingCandidates: [candidateA],
+      repairTaskSummary: buildRepairTaskSummary([repairTask]),
+      scopedInsights,
+      sources: [sourceA]
+    });
+
+    expect(views.map((view) => view.id)).toContain("repair-open");
+    expect(views.map((view) => view.id)).toContain("review-due");
+    expect(views.map((view) => view.id)).toContain("candidate-review");
+    expect(views.some((view) => view.scopeLabel === "tag" && (view.href.includes("/review?tag=") || view.href.includes("/review/mistakes?tag=")))).toBe(true);
+    expect(views[0].priority).toBe("high");
   });
 });
 

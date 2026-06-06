@@ -42,6 +42,7 @@ Derived insight evidence:
 - `reliabilityEvidence`: five confidence buckets with expected correctness, actual correctness, sample count, gap, and `empty | thin | enough` status.
 - `insightEvidenceThresholds`: local evidence gates for trend and reliability readability. These are derived from review logs and are not stored in IndexedDB.
 - `scopedInsights`: derived material, tag, and concept groups. Each item carries an evidence status, a metric label, detail chips, and an action link back to the relevant workspace.
+- `studyViews`: derived home entries that turn repair tasks, due cards, pending candidates, and scoped insights into one-click learning views.
 - Thin evidence must be shown as thin evidence. The UI must not present empty or one-sample metrics as stable learning conclusions.
 
 Scoped insights are local selectors, not persisted analytics records:

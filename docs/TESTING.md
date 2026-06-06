@@ -55,6 +55,7 @@ High-value unit tests should cover:
 - confidence reliability bucket status: `empty`, `thin`, and `enough`;
 - insight evidence thresholds that prevent thin review data from being treated as stable conclusions;
 - scoped material, tag, and concept insight derivation with evidence status and action links;
+- home study view priority for repair, due review, candidates, material, tag, concept, and first-material fallback;
 - export manifest shape;
 - import package parse and schema rejection;
 - import preview warnings, repairable issues, and fatal problems;
@@ -95,6 +96,7 @@ Desktop and mobile should cover:
 - review with confidence prediction;
 - strict review state machine and keyboard shortcuts;
 - home study mode launcher and global command palette navigation;
+- home study views for scoped repair/review/candidate/material/tag/concept continuation;
 - material reader workbench, evidence coverage map, and source-to-Feynman handoff;
 - active reading track, recommended chunk, and read-after-recall prompts;
 - high-confidence error repair task visibility;

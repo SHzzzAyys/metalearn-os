@@ -130,6 +130,13 @@ export function deriveWorkspace(input: { state: WorkspaceState; now: Date; nowMs
   const reliabilityEvidence = deriveReliabilityEvidence(state.logs);
   const insightEvidenceThresholds = deriveInsightEvidenceThresholds(state.logs, calibrationTrend, reliabilityEvidence);
   const scopedInsights = deriveScopedInsights(state, explanationThreads);
+  const studyViews = deriveStudyViews({
+    dueCards,
+    pendingCandidates,
+    repairTaskSummary,
+    scopedInsights,
+    sources: state.sources
+  });
   const latestPreview = state.aiRequestPreviews[0];
   return {
     pendingCandidates,
@@ -148,6 +155,7 @@ export function deriveWorkspace(input: { state: WorkspaceState; now: Date; nowMs
     reliabilityEvidence,
     insightEvidenceThresholds,
     scopedInsights,
+    studyViews,
     latestPreview,
     repairTaskSummary,
     modules: buildModules(dueCards.length, pendingCandidates.length, repairTaskSummary.openCount),
@@ -282,6 +290,16 @@ export interface ScopedInsightGroups {
   materials: ScopedInsight[];
   tags: ScopedInsight[];
   concepts: ScopedInsight[];
+}
+
+export interface StudyView {
+  id: string;
+  title: string;
+  detail: string;
+  href: string;
+  scopeLabel: string;
+  metric: string;
+  priority: "high" | "medium" | "low";
 }
 
 export function deriveCalibrationTrend(logs: ReviewLog[], maxPoints = 7): CalibrationTrendPoint[] {
@@ -468,6 +486,114 @@ export function deriveScopedInsights(state: WorkspaceState, explanationThreads: 
     .slice(0, 4);
 
   return { materials, tags, concepts };
+}
+
+export function deriveStudyViews(input: {
+  dueCards: Card[];
+  pendingCandidates: CardCandidate[];
+  repairTaskSummary: ReturnType<typeof buildRepairTaskSummary>;
+  scopedInsights: ScopedInsightGroups;
+  sources: SourceDocument[];
+}): StudyView[] {
+  const views: StudyView[] = [];
+  if (input.repairTaskSummary.unresolvedCount > 0) {
+    views.push({
+      id: "repair-open",
+      title: "高信心错误修复",
+      detail: "先处理最危险的熟悉感错误，把错因转成解释或补救卡。",
+      href: "/review/mistakes",
+      scopeLabel: "repair",
+      metric: `${input.repairTaskSummary.unresolvedCount} 个未解决`,
+      priority: "high"
+    });
+  }
+  if (input.dueCards.length > 0) {
+    views.push({
+      id: "review-due",
+      title: "全部到期复习",
+      detail: "不筛选主题，先完成今天到期的校准提取。",
+      href: "/review",
+      scopeLabel: "all due",
+      metric: `${input.dueCards.length} 张到期`,
+      priority: input.repairTaskSummary.unresolvedCount > 0 ? "medium" : "high"
+    });
+  }
+  if (input.pendingCandidates.length > 0) {
+    views.push({
+      id: "candidate-review",
+      title: "候选题审核",
+      detail: "生成题还不是学习证据。先检查来源、答案和标签，再批准入队。",
+      href: "/library#candidate-review",
+      scopeLabel: "candidate",
+      metric: `${input.pendingCandidates.length} 张待审`,
+      priority: input.dueCards.length > 0 ? "medium" : "high"
+    });
+  }
+
+  const material = input.scopedInsights.materials.find((item) => item.status !== "empty") ?? input.scopedInsights.materials[0];
+  if (material) {
+    views.push({
+      id: `material-view-${material.id}`,
+      title: `材料视图：${material.label}`,
+      detail: material.summary,
+      href: material.href.includes("/review/mistakes") ? material.href : `/review?sourceId=${encodeScopedParam(material.id.replace(/^material-/, ""))}`,
+      scopeLabel: "material",
+      metric: material.metricLabel,
+      priority: material.highConfidenceErrorCount ? "high" : material.status === "thin" ? "medium" : "low"
+    });
+  }
+
+  const tag = input.scopedInsights.tags.find((item) => item.status !== "empty") ?? input.scopedInsights.tags[0];
+  if (tag) {
+    views.push({
+      id: `tag-view-${tag.id}`,
+      title: `tag 视图：${tag.label}`,
+      detail: tag.summary,
+      href: tag.href.includes("/review/mistakes") ? tag.href : `/review?tag=${encodeScopedParam(tag.label)}`,
+      scopeLabel: "tag",
+      metric: tag.metricLabel,
+      priority: tag.highConfidenceErrorCount ? "high" : tag.status === "thin" ? "medium" : "low"
+    });
+  }
+
+  const concept = input.scopedInsights.concepts[0];
+  if (concept) {
+    views.push({
+      id: `concept-view-${concept.id}`,
+      title: `概念视图：${concept.label}`,
+      detail: concept.summary,
+      href: concept.href,
+      scopeLabel: "concept",
+      metric: concept.metricLabel,
+      priority: concept.status === "thin" ? "medium" : "low"
+    });
+  }
+
+  if (views.length === 0 && input.sources.length > 0) {
+    views.push({
+      id: "continue-material",
+      title: "继续处理第一份材料",
+      detail: "先把材料片段转成候选题、解释或复习证据。",
+      href: `/library/${input.sources[0].id}`,
+      scopeLabel: "material",
+      metric: input.sources[0].title,
+      priority: "medium"
+    });
+  }
+
+  if (views.length === 0) {
+    views.push({
+      id: "start-material",
+      title: "导入第一份材料",
+      detail: "没有本地证据时不生成学习判断。先导入一段真实文本。",
+      href: "/library#material-import",
+      scopeLabel: "start",
+      metric: "0 份材料",
+      priority: "medium"
+    });
+  }
+
+  return dedupeStudyViews(views).slice(0, 5);
 }
 
 export function deriveMaterialDetail(state: WorkspaceState, sourceId: string) {
@@ -861,6 +987,18 @@ function compareScopedInsights(left: ScopedInsight, right: ScopedInsight): numbe
   const statusDiff = evidenceStatusRank(left.status) - evidenceStatusRank(right.status);
   if (statusDiff !== 0) return statusDiff;
   return right.evidenceCount - left.evidenceCount;
+}
+
+function dedupeStudyViews(views: StudyView[]): StudyView[] {
+  const seen = new Set<string>();
+  const priorityRank: Record<StudyView["priority"], number> = { high: 0, medium: 1, low: 2 };
+  return views
+    .sort((left, right) => priorityRank[left.priority] - priorityRank[right.priority])
+    .filter((view) => {
+      if (seen.has(view.href)) return false;
+      seen.add(view.href);
+      return true;
+    });
 }
 
 function buildScopedReviewSummary(stats: ReturnType<typeof buildScopedReviewStats>, label: string): string {
