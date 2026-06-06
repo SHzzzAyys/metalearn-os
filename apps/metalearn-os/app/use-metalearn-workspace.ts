@@ -24,6 +24,7 @@ import type {
   ReviewLog,
   ReviewOutcome,
   ReviewStateMachine,
+  SavedStudyView,
   SourceInputType,
   SourceChunk,
   SourceDocument
@@ -65,7 +66,7 @@ import {
   type MaterialFileKind,
   type MaterialImportDraft
 } from "./material-import-state";
-import { deriveWorkspace, emptyWorkspaceState, sampleText, type WorkspaceState } from "./workspace-selectors";
+import { deriveWorkspace, emptyWorkspaceState, sampleText, type StudyView, type WorkspaceState } from "./workspace-selectors";
 
 interface PendingCardRequest {
   previewId: string;
@@ -97,6 +98,7 @@ interface ImportReport {
   candidateCount: number;
   cardCount: number;
   reviewCount: number;
+  savedStudyViewCount: number;
   skippedCount: number;
   repairedCount: number;
   firstMaterialId?: string;
@@ -194,7 +196,8 @@ export function useMetaLearnWorkspace() {
       insights,
       aiConfigs,
       aiRequestPreviews,
-      repairTasks
+      repairTasks,
+      savedStudyViews
     ] = await Promise.all([
       db.sourceDocuments.orderBy("createdAt").reverse().toArray(),
       db.sourceChunks.toArray(),
@@ -211,9 +214,10 @@ export function useMetaLearnWorkspace() {
       db.insightSnapshots.orderBy("createdAt").reverse().toArray(),
       db.aiProviderConfigs.orderBy("updatedAt").reverse().toArray(),
       db.aiRequestPreviews.orderBy("createdAt").reverse().toArray(),
-      db.repairTasks.orderBy("createdAt").reverse().toArray()
+      db.repairTasks.orderBy("createdAt").reverse().toArray(),
+      db.savedStudyViews.orderBy("updatedAt").reverse().toArray()
     ]);
-    setState({ sources, chunks, importJobs, candidates, cards, logs, sessions, checkIns, reflections, explanations, conceptNodes, conceptEdges, insights, aiConfigs, aiRequestPreviews, repairTasks });
+    setState({ sources, chunks, importJobs, candidates, cards, logs, sessions, checkIns, reflections, explanations, conceptNodes, conceptEdges, insights, aiConfigs, aiRequestPreviews, repairTasks, savedStudyViews });
     setNowMs(Date.now());
     setIsLoading(false);
   }, []);
@@ -1023,6 +1027,38 @@ export function useMetaLearnWorkspace() {
     return setAction(result(true, "已保存洞察快照。"));
   }
 
+  async function saveStudyView(view: StudyView): Promise<ActionResult> {
+    const timestamp = new Date().toISOString();
+    const id = `saved_${view.id}`;
+    const existing = state.savedStudyViews.find((item) => item.id === id);
+    const savedView: SavedStudyView = {
+      id,
+      title: view.title,
+      detail: view.detail,
+      href: view.href,
+      scopeKind: view.scopeKind,
+      scopeValue: view.scopeValue,
+      metric: view.metric,
+      priority: view.priority,
+      createdAt: existing?.createdAt ?? timestamp,
+      updatedAt: timestamp,
+      lastOpenedAt: existing?.lastOpenedAt
+    };
+    await getMetaLearnDb().savedStudyViews.put(savedView);
+    await saveLearningEvent({ id: createId("event"), appId: "metalearn-os", actionType: "study_view_saved", outcome: "saved", createdAt: timestamp });
+    await loadData();
+    return setAction(result(true, "已固定到首页学习视图。"));
+  }
+
+  async function removeSavedStudyView(id: string): Promise<ActionResult> {
+    const existing = state.savedStudyViews.find((item) => item.id === id);
+    if (!existing) return setAction(result(false, "找不到这个固定学习视图。"));
+    await getMetaLearnDb().savedStudyViews.delete(id);
+    await saveLearningEvent({ id: createId("event"), appId: "metalearn-os", actionType: "study_view_removed", outcome: "saved", createdAt: new Date().toISOString() });
+    await loadData();
+    return setAction(result(true, "已取消固定学习视图。"));
+  }
+
   async function saveAIConfig(): Promise<ActionResult> {
     const timestamp = new Date().toISOString();
     const config: AIProviderConfig = {
@@ -1100,6 +1136,7 @@ export function useMetaLearnWorkspace() {
         candidateCount: importPlan.inserts.candidates.length,
         cardCount: importPlan.inserts.cards.length,
         reviewCount: importPlan.inserts.reviews.length,
+        savedStudyViewCount: importPlan.inserts.savedStudyViews.length,
         skippedCount: importPlan.skipped.length,
         repairedCount: importPlan.repaired.length,
         firstMaterialId
@@ -1134,7 +1171,8 @@ export function useMetaLearnWorkspace() {
       reflections: state.reflections,
       insights: state.insights,
       aiRequestPreviews: state.aiRequestPreviews,
-      repairTasks: state.repairTasks
+      repairTasks: state.repairTasks,
+      savedStudyViews: state.savedStudyViews
     };
     downloadTextFile(
       "metalearn-os-export.json",
@@ -1310,6 +1348,8 @@ export function useMetaLearnWorkspace() {
     saveSession,
     recordCheckIn,
     saveInsight,
+    saveStudyView,
+    removeSavedStudyView,
     saveAIConfig,
     resetLocalData,
     prepareJsonImport,
@@ -1359,7 +1399,8 @@ function buildCurrentImportPayload(state: WorkspaceState): ImportPackagePayload 
     insights: state.insights,
     aiProviderConfigs: state.aiConfigs,
     aiRequestPreviews: state.aiRequestPreviews,
-    repairTasks: state.repairTasks
+    repairTasks: state.repairTasks,
+    savedStudyViews: state.savedStudyViews
   };
 }
 

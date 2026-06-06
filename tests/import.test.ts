@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Card, CardCandidate, RepairTask, ReviewLog, SourceChunk, SourceDocument } from "@metalearn/core";
+import type { Card, CardCandidate, RepairTask, ReviewLog, SavedStudyView, SourceChunk, SourceDocument } from "@metalearn/core";
 import { createInitialFsrsState } from "@metalearn/learning-science";
 import {
   createExportManifest,
@@ -77,6 +77,19 @@ const repairTask: RepairTask = {
   linkedRemedialCandidateIds: []
 };
 
+const savedStudyView: SavedStudyView = {
+  id: "saved_material_source_1",
+  title: "材料视图：Spacing notes",
+  detail: "Keep reviewing this source.",
+  href: "/review?sourceId=source_1",
+  scopeKind: "material",
+  scopeValue: "source_1",
+  metric: "Brier 0.200",
+  priority: "medium",
+  createdAt: "2026-06-01T00:00:00.000Z",
+  updatedAt: "2026-06-01T00:00:00.000Z"
+};
+
 function fullPackage(overrides: Record<string, unknown> = {}) {
   const payload = {
     materials: [source],
@@ -94,6 +107,7 @@ function fullPackage(overrides: Record<string, unknown> = {}) {
     insights: [],
     aiRequestPreviews: [],
     repairTasks: [repairTask],
+    savedStudyViews: [savedStudyView],
     ...overrides
   };
   return serializeExportPackage(payload, createExportManifest(payload));
@@ -156,7 +170,7 @@ describe("JSON import packages", () => {
     expect(plan.inserts.reviews[0].sourceId).toBe("source_1");
   });
 
-  it("imports v3 packages with empty repair tasks", () => {
+  it("imports v3 and v4 packages with empty newer tables", () => {
     const v3 = JSON.stringify({
       schemaVersion: 3,
       payload: { materials: [source], chunks: [chunk], candidates: [candidate], cards: [card], reviews: [review] }
@@ -165,7 +179,19 @@ describe("JSON import packages", () => {
     expect(parsed.ok).toBe(true);
     if (parsed.ok) {
       expect(parsed.package.payload.repairTasks).toEqual([]);
+      expect(parsed.package.payload.savedStudyViews).toEqual([]);
       expect(createImportPreview(parsed.package).canImport).toBe(true);
+    }
+
+    const v4 = JSON.stringify({
+      schemaVersion: 4,
+      payload: { materials: [source], chunks: [chunk], candidates: [candidate], cards: [card], reviews: [review], repairTasks: [repairTask] }
+    });
+    const parsedV4 = parseImportPackage(v4);
+    expect(parsedV4.ok).toBe(true);
+    if (parsedV4.ok) {
+      expect(parsedV4.package.payload.repairTasks).toHaveLength(1);
+      expect(parsedV4.package.payload.savedStudyViews).toEqual([]);
     }
   });
 
@@ -184,6 +210,8 @@ describe("JSON import packages", () => {
     expect(plan.inserts.reviews[0].cardId).toBe(plan.inserts.cards[0].id);
     expect(plan.inserts.repairTasks[0].cardId).toBe(plan.inserts.cards[0].id);
     expect(plan.inserts.repairTasks[0].reviewLogId).toBe(plan.inserts.reviews[0].id);
+    expect(plan.inserts.savedStudyViews[0].scopeValue).toBe(plan.inserts.materials[0].id);
+    expect(plan.inserts.savedStudyViews[0].href).toContain(plan.inserts.materials[0].id);
     expect(JSON.stringify(parsed.package.payload)).toBe(before);
   });
 
@@ -198,6 +226,7 @@ describe("JSON import packages", () => {
     expect(plan.inserts.chunks).toHaveLength(0);
     expect(plan.inserts.cards).toHaveLength(0);
     expect(plan.inserts.repairTasks).toHaveLength(0);
+    expect(plan.inserts.savedStudyViews).toHaveLength(0);
     expect(plan.skipped.length).toBeGreaterThan(0);
   });
 

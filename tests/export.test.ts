@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Card, CardCandidate, SourceChunk, SourceDocument } from "@metalearn/core";
+import type { Card, CardCandidate, SavedStudyView, SourceChunk, SourceDocument } from "@metalearn/core";
 import { buildStudyAssets, cardsToCsv, candidatesToAnkiTsv, createExportManifest, serializeExportPackage, validateCardCandidateEvidence } from "@metalearn/storage";
 import { createInitialFsrsState } from "@metalearn/learning-science";
 
@@ -53,23 +53,37 @@ const candidate: CardCandidate = {
   createdAt: "2026-05-31T00:00:00.000Z"
 };
 
+const savedStudyView: SavedStudyView = {
+  id: "saved_material_source_1",
+  title: "材料视图：Spacing notes",
+  detail: "Continue spacing review.",
+  href: "/review?sourceId=source_1",
+  scopeKind: "material",
+  scopeValue: "source_1",
+  metric: "Brier 0.200",
+  priority: "medium",
+  createdAt: "2026-05-31T00:00:00.000Z",
+  updatedAt: "2026-05-31T00:00:00.000Z"
+};
+
 describe("exports", () => {
-  it("serializes export packages with schema v4 manifest metadata", () => {
-    const manifest = createExportManifest({ materials: [source], cards: [card], reviews: [{}], aiRequestPreviews: [{}], repairTasks: [{}] });
+  it("serializes export packages with schema v5 manifest metadata", () => {
+    const manifest = createExportManifest({ materials: [source], cards: [card], reviews: [{}], aiRequestPreviews: [{}], repairTasks: [{}], savedStudyViews: [savedStudyView] });
     const parsed = JSON.parse(serializeExportPackage({ cards: [card] }, manifest)) as {
       version: number;
       schemaVersion: number;
       manifest: ReturnType<typeof createExportManifest>;
-      payload: { cards: Card[] };
+      payload: { cards: Card[]; savedStudyViews: SavedStudyView[] };
     };
 
-    expect(parsed.version).toBe(4);
-    expect(parsed.schemaVersion).toBe(4);
-    expect(parsed.manifest.schemaVersion).toBe(4);
+    expect(parsed.version).toBe(5);
+    expect(parsed.schemaVersion).toBe(5);
+    expect(parsed.manifest.schemaVersion).toBe(5);
     expect(parsed.manifest.counts.materials).toBe(1);
     expect(parsed.manifest.counts.cards).toBe(1);
     expect(parsed.manifest.counts.reviews).toBe(1);
     expect(parsed.manifest.counts.repairTasks).toBe(1);
+    expect(parsed.manifest.counts.savedStudyViews).toBe(1);
     expect(parsed.manifest.includesAIRequestRecords).toBe(true);
     expect(parsed.payload.cards[0].id).toBe("card_1");
   });

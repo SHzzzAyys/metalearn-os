@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Archive,
   AlertTriangle,
+  Bookmark,
+  BookmarkX,
   Brain,
   Check,
   ClipboardCheck,
@@ -39,6 +41,7 @@ import type {
   ProductArea,
   RepairTask,
   ReviewOutcome,
+  SavedStudyView,
   SourceChunk,
   SourceDocument,
   SourceInputType
@@ -243,8 +246,16 @@ function buildQuickCommands(workspace: Workspace, sourceId?: string): QuickComma
   const navigate = (href: string) => {
     window.location.href = href;
   };
+  const savedViewCommands: QuickCommand[] = workspace.state.savedStudyViews.slice(0, 6).map((view) => ({
+    id: `saved-view-${view.id}`,
+    section: "固定视图",
+    title: view.title,
+    detail: `${studyViewScopeLabel(view.scopeKind)} · ${view.metric}`,
+    run: () => navigate(view.href)
+  }));
 
   return [
+    ...savedViewCommands,
     {
       id: "library-import",
       section: "资料",
@@ -487,6 +498,7 @@ function HomeView({ workspace }: { workspace: Workspace }) {
 
 function StudyModeLauncher({ workspace }: { workspace: Workspace }) {
   const { derived, state } = workspace;
+  const savedViewIds = new Set(state.savedStudyViews.map((view) => view.id));
   const modes = [
     {
       label: "导入资料",
@@ -542,13 +554,32 @@ function StudyModeLauncher({ workspace }: { workspace: Workspace }) {
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h3 className="text-xl font-semibold tracking-[-0.02em]">继续学习视图</h3>
-            <p className="mt-1 text-sm leading-6 text-zinc-600">从洞察里提炼出的轻量 filtered views：按错误、到期、材料、tag 或概念继续。</p>
+            <p className="mt-1 text-sm leading-6 text-zinc-600">按错误、到期、材料、tag 或概念继续；常用范围可以固定在首页。</p>
           </div>
           <TextLink href="/insights">查看洞察</TextLink>
         </div>
+        {state.savedStudyViews.length > 0 ? (
+          <div className="mt-4">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <p className="text-sm font-semibold text-zinc-900">固定视图</p>
+              <span className="text-xs font-medium text-zinc-500">{state.savedStudyViews.length} 个本地保存</span>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2">
+              {state.savedStudyViews.map((view) => (
+                <StudyViewLink key={view.id} view={view} saved onRemove={() => void workspace.removeSavedStudyView(view.id)} />
+              ))}
+            </div>
+          </div>
+        ) : null}
         <div className="mt-4 grid gap-2 md:grid-cols-2">
           {derived.studyViews.map((view) => (
-            <StudyViewLink key={view.id} view={view} />
+            <StudyViewLink
+              key={view.id}
+              view={view}
+              saved={savedViewIds.has(`saved_${view.id}`)}
+              onSave={() => void workspace.saveStudyView(view)}
+              onRemove={() => void workspace.removeSavedStudyView(`saved_${view.id}`)}
+            />
           ))}
         </div>
       </div>
@@ -556,23 +587,62 @@ function StudyModeLauncher({ workspace }: { workspace: Workspace }) {
   );
 }
 
-function StudyViewLink({ view }: { view: Workspace["derived"]["studyViews"][number] }) {
+type StudyViewDisplay = Workspace["derived"]["studyViews"][number] | SavedStudyView;
+
+function StudyViewLink({
+  view,
+  saved = false,
+  onSave,
+  onRemove
+}: {
+  view: StudyViewDisplay;
+  saved?: boolean;
+  onSave?: () => void;
+  onRemove?: () => void;
+}) {
   const tone =
     view.priority === "high"
       ? "border-rose-100 bg-rose-50/70 text-rose-950"
       : view.priority === "medium"
         ? "border-amber-100 bg-amber-50/70 text-amber-950"
         : "border-zinc-100 bg-white/70 text-zinc-800";
+  const scopeLabel = "scopeLabel" in view ? view.scopeLabel : studyViewScopeLabel(view.scopeKind);
   return (
-    <a href={view.href} className={`min-w-0 rounded-2xl border p-3 transition hover:-translate-y-0.5 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 ${tone}`}>
+    <article className={`min-w-0 rounded-2xl border p-3 transition hover:-translate-y-0.5 hover:shadow-sm ${tone}`}>
       <div className="flex flex-wrap gap-2">
-        <Badge>{view.scopeLabel}</Badge>
+        <Badge>{scopeLabel}</Badge>
         <Badge>{view.metric}</Badge>
+        {saved ? <Badge>已固定</Badge> : null}
       </div>
       <p className="mt-2 break-words text-sm font-semibold">{view.title}</p>
       <p className="mt-1 break-words text-xs leading-5 opacity-80">{view.detail}</p>
-    </a>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <TextLink href={view.href}>进入视图</TextLink>
+        {saved ? (
+          <SecondaryButton className="!min-h-8 !rounded-lg !px-2.5 !py-1 !text-xs" onClick={onRemove}>
+            <BookmarkX size={14} /> 取消固定
+          </SecondaryButton>
+        ) : (
+          <SecondaryButton className="!min-h-8 !rounded-lg !px-2.5 !py-1 !text-xs" onClick={onSave}>
+            <Bookmark size={14} /> 固定
+          </SecondaryButton>
+        )}
+      </div>
+    </article>
   );
+}
+
+function studyViewScopeLabel(kind: SavedStudyView["scopeKind"]): string {
+  const labels: Record<SavedStudyView["scopeKind"], string> = {
+    repair: "repair",
+    all_due: "all due",
+    candidate: "candidate",
+    material: "material",
+    tag: "tag",
+    concept: "concept",
+    custom: "custom"
+  };
+  return labels[kind];
 }
 
 function LibraryView({ workspace }: { workspace: Workspace }) {
@@ -1105,7 +1175,7 @@ function ImportRestorePanel({ workspace }: { workspace: Workspace }) {
             <p className="font-semibold">导入完成</p>
             <p className="mt-1">
               新增 {workspace.importReport.materialCount} 份材料、{workspace.importReport.cardCount} 张卡片、{workspace.importReport.reviewCount} 条复习记录。
-              修复 {workspace.importReport.repairedCount} 项，跳过 {workspace.importReport.skippedCount} 项。
+              固定视图 {workspace.importReport.savedStudyViewCount} 个；修复 {workspace.importReport.repairedCount} 项，跳过 {workspace.importReport.skippedCount} 项。
             </p>
             {workspace.importReport.firstMaterialId ? <TextLink href={`/library/${workspace.importReport.firstMaterialId}`}>查看导入材料</TextLink> : null}
           </div>
@@ -1134,6 +1204,7 @@ function ImportPreviewBlock({ workspace, preview }: { workspace: Workspace; prev
         <ImportCount label="会话" value={preview.counts.sessions} />
         <ImportCount label="洞察" value={preview.counts.insights} />
         <ImportCount label="AI 记录" value={preview.counts.aiRequestPreviews} />
+        <ImportCount label="固定视图" value={preview.counts.savedStudyViews} />
       </div>
       <div className="mt-4 grid gap-3">
         <Field label="冲突策略">

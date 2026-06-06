@@ -1,6 +1,6 @@
 # Data Model
 
-MetaLearn OS stores user learning data locally in IndexedDB. The current schema version is `v4`.
+MetaLearn OS stores user learning data locally in IndexedDB. The current schema version is `v5`.
 
 ## Core Tables
 
@@ -34,6 +34,7 @@ Insight and AI boundary:
 - `insightSnapshots`: saved metrics and recommendations.
 - `aiProviderConfigs`: local provider configuration.
 - `aiRequestPreviews`: preview, confirmation, completion, and failure records for AI requests.
+- `savedStudyViews`: user-pinned learning scopes for the home launcher.
 - `learningEvents`: shared event log across modules.
 
 Derived insight evidence:
@@ -43,6 +44,7 @@ Derived insight evidence:
 - `insightEvidenceThresholds`: local evidence gates for trend and reliability readability. These are derived from review logs and are not stored in IndexedDB.
 - `scopedInsights`: derived material, tag, and concept groups. Each item carries an evidence status, a metric label, detail chips, and an action link back to the relevant workspace.
 - `studyViews`: derived home entries that turn repair tasks, due cards, pending candidates, and scoped insights into one-click learning views.
+- `savedStudyViews`: persisted copies of user-pinned study views. They store a title, detail, href, scope kind, optional scope value, metric label, priority, and timestamps. They do not store duplicated material text or card content.
 - Thin evidence must be shown as thin evidence. The UI must not present empty or one-sample metrics as stable learning conclusions.
 
 Scoped insights are local selectors, not persisted analytics records:
@@ -128,7 +130,7 @@ Important boundary: viewing or focusing a chunk is not stored as learning eviden
 
 ## Material Import Runtime State
 
-Material file reading and candidate-generation diagnosis are client runtime state, not IndexedDB schema. This keeps schema `v4` stable while making the import flow observable.
+Material file reading and candidate-generation diagnosis are client runtime state, not IndexedDB schema. This keeps the import flow observable without turning every transient UI step into durable learning evidence.
 
 The runtime draft tracks:
 
@@ -204,6 +206,7 @@ Export packages should include:
 - cards;
 - reviews;
 - repair tasks;
+- saved study views;
 - sessions;
 - check-ins;
 - reflections;
@@ -215,7 +218,7 @@ Export packages should include:
 
 ## Import and Restore
 
-The current restore format is the same schema `v4` JSON package produced by the app. The importer also accepts schema `v3` packages and treats missing `repairTasks` as an empty array. The importer recognizes:
+The current restore format is the same schema `v5` JSON package produced by the app. The importer also accepts schema `v3` and `v4` packages and treats missing newer tables such as `repairTasks` or `savedStudyViews` as empty arrays. The importer recognizes:
 
 - `full_backup`: a full local workspace export;
 - `material_package`: one material plus its related chunks, candidates, cards, reviews, explanations, sessions, insights, and audit records;
@@ -235,7 +238,7 @@ The importer must not mutate IndexedDB during parse, validation, or preview. A f
 
 Import validation checks:
 
-- `schemaVersion` must equal `3` or `4`;
+- `schemaVersion` must equal `3`, `4`, or `5`;
 - manifest counts should match payload counts, otherwise a warning is shown;
 - `SourceChunk.sourceId` must resolve to a material;
 - `CardCandidate.sourceChunkId` must resolve to a chunk;
@@ -257,12 +260,15 @@ Two conflict strategies are supported:
 
 The importer does not support overwrite. This is deliberate: local learning records are user-owned evidence, so restoring a backup must not silently replace current work.
 
+Saved study views follow the same conflict rules. In `keep_both`, material-scoped saved views have their `scopeValue` and href rewritten when a material id is remapped. In `skip_duplicates`, saved views are skipped when their id already exists or their material dependency was skipped.
+
 ## Migration Rules
 
 For future schema versions:
 
 - migrations must be additive where possible;
-- v3 exports should remain readable with `repairTasks` defaulting to an empty array;
+- v3 exports should remain readable with `repairTasks` and `savedStudyViews` defaulting to empty arrays;
+- v4 exports should remain readable with `savedStudyViews` defaulting to an empty array;
 - older unsupported exports should be clearly rejected with an actionable message;
 - dangling references should be detected by integrity checks;
 - migration tests must cover representative v3 data.

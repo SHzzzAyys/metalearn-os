@@ -56,11 +56,12 @@ High-value unit tests should cover:
 - insight evidence thresholds that prevent thin review data from being treated as stable conclusions;
 - scoped material, tag, and concept insight derivation with evidence status and action links;
 - home study view priority for repair, due review, candidates, material, tag, concept, and first-material fallback;
+- saved study view export/import defaults, conflict remapping, and duplicate skipping;
 - export manifest shape;
 - import package parse and schema rejection;
 - import preview warnings, repairable issues, and fatal problems;
 - import conflict planning for `keep_both` and `skip_duplicates`;
-- v3/v4 export and restore compatibility for repair tasks;
+- v3/v4 export and restore compatibility for repair tasks and saved study views;
 - AI output schemas.
 
 ## Integration Test Priorities
@@ -97,6 +98,7 @@ Desktop and mobile should cover:
 - strict review state machine and keyboard shortcuts;
 - home study mode launcher and global command palette navigation;
 - home study views for scoped repair/review/candidate/material/tag/concept continuation;
+- pinning and unpinning a home study view without breaking the underlying scoped link;
 - material reader workbench, evidence coverage map, and source-to-Feynman handoff;
 - active reading track, recommended chunk, and read-after-recall prompts;
 - high-confidence error repair task visibility;

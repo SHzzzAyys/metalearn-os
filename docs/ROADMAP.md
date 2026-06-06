@@ -195,6 +195,7 @@ Implemented:
 - scoped material, tag, and concept insight drilldowns with evidence status and action links;
 - scoped query handling for library tag filters, review tag/material filters, high-confidence repair filters, and Feynman concept prefill;
 - home study views that turn scoped evidence into one-click repair, review, candidate, material, tag, or concept entries;
+- user-pinned study views stored locally and included in JSON backup/restore packages;
 - unit coverage for explanation threads, insight action priority, calibration trend, reliability bucket status, evidence thresholds, scoped insight derivation, and study view priority.
 
 Planned work:
@@ -202,7 +203,7 @@ Planned work:
 - strengthen concept nodes and confirmed concept edges;
 - generate remedial candidates from explanation gap tags;
 - improve tag overconfidence and gap distribution charts;
-- deepen scoped filters with user-saved views, scope-specific empty states, and tag/material facets.
+- deepen scoped filters with editable saved-view definitions, scope-specific empty states, and tag/material facets.
 
 Acceptance criteria:
 

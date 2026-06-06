@@ -13,8 +13,11 @@ import type {
   Reflection,
   RepairTask,
   ReviewLog,
+  SavedStudyView,
   SourceChunk,
-  SourceDocument
+  SourceDocument,
+  StudyViewPriority,
+  StudyViewScopeKind
 } from "@metalearn/core";
 import {
   buildDailyPlan,
@@ -49,6 +52,7 @@ export interface WorkspaceState {
   aiConfigs: AIProviderConfig[];
   aiRequestPreviews: AIRequestPreview[];
   repairTasks: RepairTask[];
+  savedStudyViews: SavedStudyView[];
 }
 
 export const emptyWorkspaceState: WorkspaceState = {
@@ -67,7 +71,8 @@ export const emptyWorkspaceState: WorkspaceState = {
   insights: [],
   aiConfigs: [],
   aiRequestPreviews: [],
-  repairTasks: []
+  repairTasks: [],
+  savedStudyViews: []
 };
 
 export const sampleText =
@@ -298,8 +303,10 @@ export interface StudyView {
   detail: string;
   href: string;
   scopeLabel: string;
+  scopeKind: StudyViewScopeKind;
+  scopeValue?: string;
   metric: string;
-  priority: "high" | "medium" | "low";
+  priority: StudyViewPriority;
 }
 
 export function deriveCalibrationTrend(logs: ReviewLog[], maxPoints = 7): CalibrationTrendPoint[] {
@@ -503,6 +510,7 @@ export function deriveStudyViews(input: {
       detail: "先处理最危险的熟悉感错误，把错因转成解释或补救卡。",
       href: "/review/mistakes",
       scopeLabel: "repair",
+      scopeKind: "repair",
       metric: `${input.repairTaskSummary.unresolvedCount} 个未解决`,
       priority: "high"
     });
@@ -514,6 +522,7 @@ export function deriveStudyViews(input: {
       detail: "不筛选主题，先完成今天到期的校准提取。",
       href: "/review",
       scopeLabel: "all due",
+      scopeKind: "all_due",
       metric: `${input.dueCards.length} 张到期`,
       priority: input.repairTaskSummary.unresolvedCount > 0 ? "medium" : "high"
     });
@@ -525,6 +534,7 @@ export function deriveStudyViews(input: {
       detail: "生成题还不是学习证据。先检查来源、答案和标签，再批准入队。",
       href: "/library#candidate-review",
       scopeLabel: "candidate",
+      scopeKind: "candidate",
       metric: `${input.pendingCandidates.length} 张待审`,
       priority: input.dueCards.length > 0 ? "medium" : "high"
     });
@@ -532,12 +542,15 @@ export function deriveStudyViews(input: {
 
   const material = input.scopedInsights.materials.find((item) => item.status !== "empty") ?? input.scopedInsights.materials[0];
   if (material) {
+    const sourceId = material.id.replace(/^material-/, "");
     views.push({
       id: `material-view-${material.id}`,
       title: `材料视图：${material.label}`,
       detail: material.summary,
-      href: material.href.includes("/review/mistakes") ? material.href : `/review?sourceId=${encodeScopedParam(material.id.replace(/^material-/, ""))}`,
+      href: material.href.includes("/review/mistakes") ? material.href : `/review?sourceId=${encodeScopedParam(sourceId)}`,
       scopeLabel: "material",
+      scopeKind: "material",
+      scopeValue: sourceId,
       metric: material.metricLabel,
       priority: material.highConfidenceErrorCount ? "high" : material.status === "thin" ? "medium" : "low"
     });
@@ -551,6 +564,8 @@ export function deriveStudyViews(input: {
       detail: tag.summary,
       href: tag.href.includes("/review/mistakes") ? tag.href : `/review?tag=${encodeScopedParam(tag.label)}`,
       scopeLabel: "tag",
+      scopeKind: "tag",
+      scopeValue: tag.label,
       metric: tag.metricLabel,
       priority: tag.highConfidenceErrorCount ? "high" : tag.status === "thin" ? "medium" : "low"
     });
@@ -564,6 +579,8 @@ export function deriveStudyViews(input: {
       detail: concept.summary,
       href: concept.href,
       scopeLabel: "concept",
+      scopeKind: "concept",
+      scopeValue: concept.label,
       metric: concept.metricLabel,
       priority: concept.status === "thin" ? "medium" : "low"
     });
@@ -576,6 +593,8 @@ export function deriveStudyViews(input: {
       detail: "先把材料片段转成候选题、解释或复习证据。",
       href: `/library/${input.sources[0].id}`,
       scopeLabel: "material",
+      scopeKind: "material",
+      scopeValue: input.sources[0].id,
       metric: input.sources[0].title,
       priority: "medium"
     });
@@ -588,6 +607,7 @@ export function deriveStudyViews(input: {
       detail: "没有本地证据时不生成学习判断。先导入一段真实文本。",
       href: "/library#material-import",
       scopeLabel: "start",
+      scopeKind: "custom",
       metric: "0 份材料",
       priority: "medium"
     });

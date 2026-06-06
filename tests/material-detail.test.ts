@@ -114,6 +114,7 @@ function workspaceState(overrides: Partial<WorkspaceState> = {}): WorkspaceState
     aiConfigs: [],
     aiRequestPreviews: [],
     repairTasks: [],
+    savedStudyViews: [],
     ...overrides
   };
 }

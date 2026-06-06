@@ -44,6 +44,8 @@ export type RepairTaskResolution =
   | "card_fixed"
   | "source_gap_confirmed"
   | "dismissed_not_actionable";
+export type StudyViewScopeKind = "repair" | "all_due" | "candidate" | "material" | "tag" | "concept" | "custom";
+export type StudyViewPriority = "high" | "medium" | "low";
 
 export interface ActionResult {
   ok: boolean;
@@ -244,6 +246,20 @@ export interface StudyAsset {
   updatedAt: string;
 }
 
+export interface SavedStudyView {
+  id: string;
+  title: string;
+  detail: string;
+  href: string;
+  scopeKind: StudyViewScopeKind;
+  scopeValue?: string;
+  metric: string;
+  priority: StudyViewPriority;
+  createdAt: string;
+  updatedAt: string;
+  lastOpenedAt?: string;
+}
+
 export interface ImportJob {
   id: string;
   sourceId?: string;
@@ -302,7 +318,7 @@ export interface ConceptEdge {
 }
 
 export interface ExportManifest {
-  schemaVersion: 3 | 4;
+  schemaVersion: 3 | 4 | 5;
   exportedAt: string;
   counts: {
     materials: number;
@@ -316,6 +332,7 @@ export interface ExportManifest {
     insights: number;
     aiRequestPreviews: number;
     repairTasks: number;
+    savedStudyViews: number;
   };
   includesAIRequestRecords: boolean;
 }
@@ -360,6 +377,7 @@ export interface ImportPackagePayload {
   aiProviderConfigs: AIProviderConfig[];
   aiRequestPreviews: AIRequestPreview[];
   repairTasks: RepairTask[];
+  savedStudyViews: SavedStudyView[];
 }
 
 export interface ImportPlan {
@@ -456,7 +474,9 @@ export interface LearningEvent {
     | "data_deleted"
     | "repair_task_created"
     | "repair_task_updated"
-    | "repair_task_resolved";
+    | "repair_task_resolved"
+    | "study_view_saved"
+    | "study_view_removed";
   confidence?: 1 | 2 | 3 | 4 | 5;
   outcome?: ReviewOutcome | "completed" | "saved" | "exported";
   durationMs?: number;

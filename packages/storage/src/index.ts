@@ -22,6 +22,7 @@ import type {
   Reflection,
   RepairTask,
   ReviewLog,
+  SavedStudyView,
   SourceChunk,
   SourceDocument,
   StudyAsset
@@ -44,6 +45,7 @@ export class MetaLearnDb extends Dexie {
   aiProviderConfigs!: Table<AIProviderConfig, string>;
   aiRequestPreviews!: Table<AIRequestPreview, string>;
   repairTasks!: Table<RepairTask, string>;
+  savedStudyViews!: Table<SavedStudyView, string>;
   learningEvents!: Table<LearningEvent, string>;
 
   constructor() {
@@ -109,6 +111,26 @@ export class MetaLearnDb extends Dexie {
       repairTasks: "id, status, reviewLogId, cardId, sourceId, sourceChunkId, reason, createdAt, updatedAt",
       learningEvents: "id, appId, sourceId, actionType, createdAt"
     });
+    this.version(5).stores({
+      sourceDocuments: "id, templateId, status, lastWorkedAt, createdAt",
+      sourceChunks: "id, sourceId, index",
+      importJobs: "id, sourceId, inputType, status, createdAt",
+      cardCandidates: "id, sourceChunkId, status, createdAt",
+      cards: "id, sourceChunkId, dueAt, createdAt",
+      reviewLogs: "id, cardId, sourceId, confidence, mistakeReason, evidenceStrength, createdAt",
+      learningSessions: "id, templateId, startedAt, endedAt",
+      checkIns: "id, sessionId, focusState, createdAt",
+      reflections: "id, sessionId, createdAt",
+      explanationAttempts: "id, templateId, concept, parentAttemptId, createdAt",
+      conceptNodes: "id, label, source, sourceId, updatedAt",
+      conceptEdges: "id, fromNodeId, toNodeId, relation, confirmed, createdAt",
+      insightSnapshots: "id, createdAt",
+      aiProviderConfigs: "id, mode, providerName, updatedAt",
+      aiRequestPreviews: "id, kind, sourceId, providerMode, status, createdAt",
+      repairTasks: "id, status, reviewLogId, cardId, sourceId, sourceChunkId, reason, createdAt, updatedAt",
+      savedStudyViews: "id, scopeKind, scopeValue, priority, updatedAt, lastOpenedAt",
+      learningEvents: "id, appId, sourceId, actionType, createdAt"
+    });
   }
 }
 
@@ -150,6 +172,7 @@ export async function clearAllLocalData(): Promise<void> {
     currentDb.aiProviderConfigs.clear(),
     currentDb.aiRequestPreviews.clear(),
     currentDb.repairTasks.clear(),
+    currentDb.savedStudyViews.clear(),
     currentDb.learningEvents.clear()
   ]);
 }
@@ -192,10 +215,11 @@ export function createExportManifest(input: {
   insights?: unknown[];
   aiRequestPreviews?: unknown[];
   repairTasks?: unknown[];
+  savedStudyViews?: unknown[];
 }): ExportManifest {
   const aiRequestPreviews = input.aiRequestPreviews?.length ?? 0;
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     exportedAt: new Date().toISOString(),
     counts: {
       materials: input.materials?.length ?? 0,
@@ -208,7 +232,8 @@ export function createExportManifest(input: {
       checkIns: input.checkIns?.length ?? 0,
       insights: input.insights?.length ?? 0,
       aiRequestPreviews,
-      repairTasks: input.repairTasks?.length ?? 0
+      repairTasks: input.repairTasks?.length ?? 0,
+      savedStudyViews: input.savedStudyViews?.length ?? 0
     },
     includesAIRequestRecords: aiRequestPreviews > 0
   };
@@ -248,8 +273,8 @@ export function serializeExportPackage(payload: unknown, manifest?: ExportManife
   return JSON.stringify(
     {
       exportedAt: new Date().toISOString(),
-      version: 4,
-      schemaVersion: 4,
+      version: 5,
+      schemaVersion: 5,
       manifest,
       payload
     },
@@ -309,8 +334,8 @@ export function validateImportPackage(pkg: ParsedImportPackage): ImportPreview {
   const fatalProblems: ImportProblem[] = [];
   const counts = countImportPayload(pkg.payload);
 
-  if (pkg.schemaVersion !== 3 && pkg.schemaVersion !== 4) {
-    fatalProblems.push(problem("unsupported_schema", "fatal", "package", undefined, "当前版本只支持 schemaVersion 3 或 4 的导出包。"));
+  if (pkg.schemaVersion !== 3 && pkg.schemaVersion !== 4 && pkg.schemaVersion !== 5) {
+    fatalProblems.push(problem("unsupported_schema", "fatal", "package", undefined, "当前版本只支持 schemaVersion 3、4 或 5 的导出包。"));
   }
   if (pkg.kind === "unknown") {
     fatalProblems.push(problem("unknown_package", "fatal", "package", undefined, "无法识别 MetaLearn OS 导入包类型。"));
@@ -454,7 +479,8 @@ export async function applyImportPlan(db: MetaLearnDb, plan: ImportPlan): Promis
       db.insightSnapshots,
       db.aiProviderConfigs,
       db.aiRequestPreviews,
-      db.repairTasks
+      db.repairTasks,
+      db.savedStudyViews
     ],
     async () => {
       await bulkPutIfAny(db.sourceDocuments, inserts.materials);
@@ -473,6 +499,7 @@ export async function applyImportPlan(db: MetaLearnDb, plan: ImportPlan): Promis
       await bulkPutIfAny(db.aiProviderConfigs, inserts.aiProviderConfigs);
       await bulkPutIfAny(db.aiRequestPreviews, inserts.aiRequestPreviews);
       await bulkPutIfAny(db.repairTasks, inserts.repairTasks);
+      await bulkPutIfAny(db.savedStudyViews, inserts.savedStudyViews);
     }
   );
 }
@@ -610,7 +637,8 @@ function emptyImportCounts(): ExportManifest["counts"] {
     checkIns: 0,
     insights: 0,
     aiRequestPreviews: 0,
-    repairTasks: 0
+    repairTasks: 0,
+    savedStudyViews: 0
   };
 }
 
@@ -631,7 +659,8 @@ export function emptyImportPayload(): ImportPackagePayload {
     insights: [],
     aiProviderConfigs: [],
     aiRequestPreviews: [],
-    repairTasks: []
+    repairTasks: [],
+    savedStudyViews: []
   };
 }
 
@@ -652,7 +681,8 @@ function normalizeImportPayload(payload: Record<string, unknown>): ImportPackage
     insights: cloneArray<InsightSnapshot>(payload.insights),
     aiProviderConfigs: cloneArray<AIProviderConfig>(payload.aiProviderConfigs),
     aiRequestPreviews: cloneArray<AIRequestPreview>(payload.aiRequestPreviews),
-    repairTasks: cloneArray<RepairTask>(payload.repairTasks)
+    repairTasks: cloneArray<RepairTask>(payload.repairTasks),
+    savedStudyViews: cloneArray<SavedStudyView>(payload.savedStudyViews)
   };
 }
 
@@ -671,7 +701,8 @@ function detectImportPackageKind(rawPayload: Record<string, unknown>, payload: I
     "insights",
     "conceptNodes",
     "conceptEdges",
-    "aiRequestPreviews"
+    "aiRequestPreviews",
+    "savedStudyViews"
   ];
   if (broadKeys.some((key) => Array.isArray(rawPayload[key]))) return "full_backup";
   if (payload.materials.length === 1) return "material_package";
@@ -690,7 +721,8 @@ function countImportPayload(payload: ImportPackagePayload): ExportManifest["coun
     checkIns: payload.checkIns.length,
     insights: payload.insights.length,
     aiRequestPreviews: payload.aiRequestPreviews.length,
-    repairTasks: payload.repairTasks.length
+    repairTasks: payload.repairTasks.length,
+    savedStudyViews: payload.savedStudyViews.length
   };
 }
 
@@ -714,6 +746,7 @@ function findImportConflicts(payload: ImportPackagePayload, current: ImportPacka
   addConflicts(conflicts, "insights", payload.insights, current.insights);
   addConflicts(conflicts, "aiRequestPreviews", payload.aiRequestPreviews, current.aiRequestPreviews);
   addConflicts(conflicts, "repairTasks", payload.repairTasks, current.repairTasks);
+  addConflicts(conflicts, "savedStudyViews", payload.savedStudyViews, current.savedStudyViews);
   return conflicts;
 }
 
@@ -775,7 +808,8 @@ function planKeepBoth(pkg: ParsedImportPackage, current: ImportPackagePayload, p
       sourceChunkId: mapRequiredId(task.sourceChunkId),
       linkedExplanationId: mapOptionalId(task.linkedExplanationId),
       linkedRemedialCandidateIds: task.linkedRemedialCandidateIds.map((id) => mapRequiredId(id))
-    }))
+    })),
+    savedStudyViews: pkg.payload.savedStudyViews.map((view) => remapSavedStudyView(view, idMap))
   };
   return { strategy: "keep_both", preview, idMap, inserts, skipped, repaired: preview.repaired };
 }
@@ -804,7 +838,28 @@ function buildConflictIdMap(payload: ImportPackagePayload, current: ImportPackag
   add("ai_config", payload.aiProviderConfigs, current.aiProviderConfigs);
   add("preview", payload.aiRequestPreviews, current.aiRequestPreviews);
   add("repair", payload.repairTasks, current.repairTasks);
+  add("view", payload.savedStudyViews, current.savedStudyViews);
   return idMap;
+}
+
+function remapSavedStudyView(view: SavedStudyView, idMap: Record<string, string>): SavedStudyView {
+  const mappedScopeValue = view.scopeKind === "material" && view.scopeValue ? idMap[view.scopeValue] ?? view.scopeValue : view.scopeValue;
+  return {
+    ...view,
+    id: idMap[view.id] ?? view.id,
+    scopeValue: mappedScopeValue,
+    href: remapHrefIds(view.href, idMap),
+    title: idMap[view.id] ? `${view.title} 导入副本` : view.title
+  };
+}
+
+function remapHrefIds(href: string, idMap: Record<string, string>): string {
+  let nextHref = href;
+  for (const [from, to] of Object.entries(idMap)) {
+    nextHref = nextHref.split(encodeURIComponent(from)).join(encodeURIComponent(to));
+    nextHref = nextHref.split(from).join(to);
+  }
+  return nextHref;
 }
 
 function planSkipDuplicates(pkg: ParsedImportPackage, current: ImportPackagePayload, preview: ImportPreview, skipped: ImportProblem[]): ImportPlan {
@@ -898,6 +953,12 @@ function planSkipDuplicates(pkg: ParsedImportPackage, current: ImportPackagePayl
           !skippedChunkIds.has(task.sourceChunkId);
         if (!shouldKeep) skipped.push(problem("skipped_duplicate", "warning", "repairTasks", task.id, `修复任务 ${task.id} 已存在或依赖被跳过。`));
         return shouldKeep;
+      }),
+      savedStudyViews: pkg.payload.savedStudyViews.filter((view) => {
+        const dependsOnSkippedSource = view.scopeKind === "material" && view.scopeValue ? skippedSourceIds.has(view.scopeValue) : false;
+        const shouldKeep = !currentIds.savedStudyViews.has(view.id) && !dependsOnSkippedSource;
+        if (!shouldKeep) skipped.push(problem("skipped_duplicate", "warning", "savedStudyViews", view.id, `固定学习视图 ${view.id} 已存在或依赖被跳过。`));
+        return shouldKeep;
       })
     },
     skipped,
@@ -922,7 +983,8 @@ function buildCurrentIdSets(current: ImportPackagePayload) {
     insights: new Set(current.insights.map((item) => item.id)),
     aiProviderConfigs: new Set(current.aiProviderConfigs.map((item) => item.id)),
     aiRequestPreviews: new Set(current.aiRequestPreviews.map((item) => item.id)),
-    repairTasks: new Set(current.repairTasks.map((item) => item.id))
+    repairTasks: new Set(current.repairTasks.map((item) => item.id)),
+    savedStudyViews: new Set(current.savedStudyViews.map((item) => item.id))
   };
 }
 
