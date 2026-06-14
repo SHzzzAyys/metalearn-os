@@ -192,6 +192,7 @@ Implemented:
 - deterministic insight action cards on `/insights` that link back to review, mistake repair, candidate approval, explanation revision, or active material reading;
 - calibration evidence thresholds that label insufficient review data before showing trend or reliability conclusions;
 - today's review progress panel with target progress, due remaining, answer distribution, evidence strength, and high-confidence error warnings;
+- current-session undo for the just-finished review, including card schedule rollback and fresh repair-task cleanup;
 - Brier trend by review date and confidence reliability buckets on `/insights`;
 - scoped material, tag, and concept insight drilldowns with evidence status and action links;
 - scoped query handling for library tag filters, review tag/material filters, high-confidence repair filters, and Feynman concept prefill;

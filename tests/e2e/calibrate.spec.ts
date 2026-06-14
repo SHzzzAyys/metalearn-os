@@ -331,6 +331,38 @@ test("MetaLearn OS creates a review card manually from material evidence", async
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
+test("MetaLearn OS can undo an accidental review rating before it pollutes repair tasks", async ({ page }) => {
+  await page.goto("/library");
+  await page.getByRole("button", { name: "仅保存到资料库", exact: true }).click();
+  await expect(page.getByText(/已导入并分成/)).toBeVisible();
+  await page.getByRole("link", { name: "我的学习材料" }).click();
+  await page.getByRole("button", { name: /用此片段建卡/ }).first().click();
+  await page.getByLabel("问题").fill("为什么撤销误点复习很重要？");
+  await page.getByLabel("预期答案").fill("因为误点会污染调度、复习日志和高信心错误任务。");
+  await page.getByRole("button", { name: /保存候选题/ }).click();
+  await page.getByRole("button", { name: /批准进入复习/ }).first().click();
+
+  await page.goto("/review");
+  await page.locator("button").filter({ hasText: /^5$/ }).first().click();
+  await page.getByPlaceholder("先回想，再看来源。不要直接复制。").fill("误点会污染调度和日志。");
+  await page.getByRole("button", { name: "错 A", exact: true }).click();
+  await expect(page.getByText(/创建高信心错误修复任务/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "撤销本次复习 U" })).toBeVisible();
+  await page.getByRole("button", { name: "撤销本次复习 U" }).click();
+  await expect(page.getByText("已撤销本次复习，可以重新选择自评结果。")).toBeVisible();
+  await expect(page.getByText("今日 0/5")).toBeVisible();
+  await page.getByRole("button", { name: "对 C", exact: true }).click();
+  await expect(page.getByText(/本轮复习已记录/)).toBeVisible();
+  await expect(page.getByText("今日 1/5")).toBeVisible();
+
+  await page.goto("/review/mistakes");
+  await expect(page.getByText("为什么撤销误点复习很重要？")).not.toBeVisible();
+  await expect(page.getByText("没有匹配的修复任务")).toBeVisible();
+
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+});
+
 test("MetaLearn OS opens a Feynman draft from focused source evidence", async ({ page }) => {
   await page.goto("/library");
   await page.getByRole("button", { name: "仅保存到资料库", exact: true }).click();

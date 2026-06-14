@@ -121,6 +121,7 @@ export function MetaLearnOSPage({ view, sourceId, reviewMode = "main" }: { view:
       const outcomeMap: Record<string, ReviewOutcome> = { a: "again", p: "partial", c: "correct", e: "easy" };
       const outcome = outcomeMap[event.key.toLowerCase()];
       if (outcome && workspace.reviewStage === "self_rating") void workspace.completeReview(outcome);
+      if (event.key.toLowerCase() === "u" && workspace.reviewStage === "feedback") void workspace.undoLastReview();
       if (event.key.toLowerCase() === "n" && workspace.reviewStage === "feedback") workspace.startNextReview();
     }
     window.addEventListener("keydown", onKeyDown);
@@ -1503,7 +1504,12 @@ function ReviewView({ workspace }: { workspace: Workspace }) {
               <Button disabled={!canSelfRate} onClick={() => void workspace.completeReview("easy")}>轻松 E</Button>
             </div>
             <div className="rounded-2xl bg-emerald-50 p-4 text-sm font-medium text-emerald-950">{workspace.reviewFeedback}</div>
-            {workspace.reviewStage === "feedback" ? <SecondaryButton onClick={workspace.startNextReview}>进入下一张 N</SecondaryButton> : null}
+            {workspace.reviewStage === "feedback" ? (
+              <div className="flex flex-wrap gap-2">
+                <SecondaryButton disabled={!workspace.canUndoLastReview} onClick={() => void workspace.undoLastReview()}>撤销本次复习 U</SecondaryButton>
+                <SecondaryButton onClick={workspace.startNextReview}>进入下一张 N</SecondaryButton>
+              </div>
+            ) : null}
           </div>
         </ReviewCard>
       ) : (

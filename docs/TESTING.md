@@ -98,6 +98,7 @@ Desktop and mobile should cover:
 - AI failure shows a concrete error and manual-card fallback;
 - review with confidence prediction;
 - today's review progress panel updates after a completed review and flags high-confidence errors;
+- undoing the just-finished review restores the card, removes the fresh review log, and removes the fresh repair task before re-rating;
 - strict review state machine and keyboard shortcuts;
 - home study mode launcher and global command palette navigation;
 - home study views for scoped repair/review/candidate/material/tag/concept continuation;

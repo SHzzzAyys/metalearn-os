@@ -182,6 +182,8 @@ Signals include:
 
 If the source was visible before answer, the review should be treated as weak extraction evidence even when the user marks the answer correct.
 
+The app keeps a transient undo snapshot for the most recent review in the current client session. Undoing that review deletes the just-written `ReviewLog`, restores the pre-review `Card` scheduling state, and removes the just-created repair task only if that task is still `open` and has not been linked to an explanation or remedial candidate. This is intentionally not a long-term history editor and does not require a schema migration.
+
 ## Repair Tasks
 
 High-confidence repair tasks are created when a review has confidence `4` or `5` and the user marks the outcome as `again` or `partial`.

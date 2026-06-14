@@ -80,6 +80,13 @@ interface ReviewScope {
   sourceId?: string;
 }
 
+interface ReviewUndoSnapshot {
+  log: ReviewLog;
+  previousCard: Card;
+  repairTaskId?: string;
+  createdAt: string;
+}
+
 interface ManualCardForm {
   isOpen: boolean;
   sourceId: string;
@@ -148,6 +155,7 @@ export function useMetaLearnWorkspace() {
   const [mistakeReason, setMistakeReason] = useState<MistakeReason>("unknown");
   const [revealedSourceQuote, setRevealedSourceQuote] = useState("");
   const [reviewFeedback, setReviewFeedback] = useState("还没有完成本轮校准复习。");
+  const [lastReviewUndo, setLastReviewUndo] = useState<ReviewUndoSnapshot | null>(null);
   const [concept, setConcept] = useState("间隔效应");
   const [explanation, setExplanation] = useState("请用自己的话解释一个概念，不要复制材料。");
   const [explainQuote, setExplainQuote] = useState("");
@@ -775,12 +783,58 @@ export function useMetaLearnWorkspace() {
     });
     await saveLearningEvent({ id: createId("event"), sourceId: log.sourceId, appId: "metalearn-os", actionType: "review_completed", confidence: selectedConfidence, outcome, durationMs: log.durationMs, createdAt: timestamp });
     if (repairTaskId) await saveLearningEvent({ id: createId("event"), sourceId: log.sourceId, appId: "metalearn-os", actionType: "repair_task_created", confidence: selectedConfidence, outcome, createdAt: timestamp });
+    setLastReviewUndo({ log, previousCard: activeCard, repairTaskId, createdAt: timestamp });
     setReviewFeedback(`信心 ${judgment.label}，结果${isCorrect ? "答对" : "未掌握"}，校准差距 ${Math.round(gap * 100)}%，证据强度 ${log.evidenceStrength}。`);
     setRevealedSourceQuote(activeCard.sourceQuote);
     setReviewMachine(transition.state);
     setMistakeReason("unknown");
     await loadData();
     return setAction(result(true, repairTaskId ? "本轮复习已记录，并创建高信心错误修复任务。" : "本轮复习已记录，来源现在可见。"));
+  }
+
+  async function undoLastReview(): Promise<ActionResult> {
+    if (!lastReviewUndo) return setAction(result(false, "当前没有可撤销的最近复习。"));
+    const { log, previousCard, repairTaskId } = lastReviewUndo;
+    const db = getMetaLearnDb();
+    try {
+      await db.transaction("rw", db.reviewLogs, db.cards, db.repairTasks, async () => {
+        const existingLog = await db.reviewLogs.get(log.id);
+        if (!existingLog) throw new Error("这条复习记录已经不存在，不能撤销。");
+        if (repairTaskId) {
+          const task = await db.repairTasks.get(repairTaskId);
+          const taskWasAlreadyUsed =
+            task &&
+            (task.reviewLogId !== log.id ||
+              task.status !== "open" ||
+              Boolean(task.linkedExplanationId) ||
+              (task.linkedRemedialCandidateIds?.length ?? 0) > 0);
+          if (taskWasAlreadyUsed) throw new Error("这条复习已经进入修复流程，不能安全撤销。");
+          if (task) await db.repairTasks.delete(task.id);
+        }
+        await db.reviewLogs.delete(log.id);
+        await db.cards.put(previousCard);
+      });
+    } catch (caught) {
+      return setAction(result(false, caught instanceof Error ? caught.message : "撤销复习失败。"));
+    }
+    await saveLearningEvent({ id: createId("event"), sourceId: log.sourceId, appId: "metalearn-os", actionType: "review_undone", confidence: log.confidence, outcome: "completed", createdAt: new Date().toISOString() });
+    setLastReviewUndo(null);
+    setConfidence(log.confidence);
+    setEffort(log.selfRatedEffort ?? 3);
+    setMistakeReason(log.mistakeReason ?? "unknown");
+    setRevealedSourceQuote(log.sourceVisibleBeforeAnswer ? previousCard.sourceQuote : "");
+    setReviewFeedback("已撤销本次复习；答案和信心已保留，可以重新自评。");
+    setReviewMachine({
+      stage: "self_rating",
+      cardId: previousCard.id,
+      confidence: log.confidence,
+      answerText: log.answerText,
+      sourceVisibleBeforeAnswer: Boolean(log.sourceVisibleBeforeAnswer),
+      startedAt: new Date(Date.now() - Math.max(1_000, log.durationMs)).toISOString(),
+      answeredAt: log.createdAt
+    });
+    await loadData();
+    return setAction(result(true, "已撤销本次复习，可以重新选择自评结果。"));
   }
 
   function chooseConfidence(value: 1 | 2 | 3 | 4 | 5) {
@@ -820,6 +874,7 @@ export function useMetaLearnWorkspace() {
       return;
     }
     setRevealedSourceQuote("");
+    setLastReviewUndo(null);
     setReviewMachine(createReviewState(activeCard?.id));
     setReviewFeedback("还没有完成本轮校准复习。");
   }
@@ -1130,6 +1185,7 @@ export function useMetaLearnWorkspace() {
 
   async function resetLocalData(): Promise<ActionResult> {
     await clearAllLocalData();
+    setLastReviewUndo(null);
     await loadData();
     return setAction(result(true, "本地数据已清空。"));
   }
@@ -1326,6 +1382,8 @@ export function useMetaLearnWorkspace() {
     setAnswerText: setReviewAnswer,
     sourceVisibleBeforeAnswer: effectiveReviewMachine.sourceVisibleBeforeAnswer,
     markSourceSeenBeforeAnswer,
+    canUndoLastReview: Boolean(lastReviewUndo),
+    undoLastReview,
     mistakeReason,
     setMistakeReason,
     reviewStage: effectiveReviewMachine.stage,

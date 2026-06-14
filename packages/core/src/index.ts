@@ -459,6 +459,7 @@ export interface LearningEvent {
     | "candidate_rejected"
     | "card_approved"
     | "review_completed"
+    | "review_undone"
     | "session_started"
     | "checkin_recorded"
     | "session_finished"
