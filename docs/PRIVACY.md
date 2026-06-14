@@ -9,6 +9,7 @@ MetaLearn OS is designed as a local-first learning tool. Learning materials, sel
 - No cloud sync is implemented.
 - No payment or analytics provider is integrated.
 - Export is user-triggered.
+- The local sample study pack is user-triggered and writes only built-in demo material, source chunks, candidate cards, and learning events to IndexedDB. It does not read user files, call AI, or upload data.
 - Material file import is user-triggered and reads supported PDF, TXT, and Markdown files locally in the browser; scanned-PDF OCR is not implemented.
 - Selecting a material file does not write IndexedDB and does not upload data. It only fills the local text preview until the user clicks a save action.
 - Saving a material creates local `SourceDocument` and `SourceChunk` records. Candidate generation is a separate step and still requires AI upload preview confirmation.

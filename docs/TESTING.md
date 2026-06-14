@@ -90,6 +90,7 @@ Important integration paths:
 
 Desktop and mobile should cover:
 
+- local sample pack loading without AI upload preview;
 - first material import;
 - PDF/TXT/Markdown file selection and visible local text preview;
 - unsaved selected file cannot be treated as an imported material;

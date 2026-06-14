@@ -43,6 +43,7 @@ New product work should land in `apps/metalearn-os` first.
 Implemented:
 
 - local-first PWA-style Next.js app;
+- local sample study pack for trying the material -> candidate review -> calibration loop without finding a file or calling AI;
 - text and Markdown paste or file import, plus selectable text-layer PDF file extraction;
 - visible material import stages, text-quality checks, and candidate-generation diagnostics;
 - automatic chunking;

@@ -128,6 +128,21 @@ test("MetaLearn OS exposes a study mode launcher and command palette", async ({ 
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
+test("MetaLearn OS loads a local sample pack without AI upload", async ({ page }) => {
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "加载本地示例包" }).click();
+  await expect(page.getByText(/已加载本地示例包/)).toBeVisible();
+
+  await page.goto("/library#candidate-review");
+  await expect(page.getByRole("heading", { name: "资料库" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "示例：主动提取与信心校准" })).toBeVisible();
+  await expect(page.getByText("将发送哪些内容")).not.toBeVisible();
+  const approveButtons = page.getByRole("button", { name: /批准进入复习/ });
+  await expect(approveButtons.first()).toBeVisible();
+  expect(await approveButtons.count()).toBeGreaterThanOrEqual(4);
+});
+
 test("MetaLearn OS imports a selectable text-layer PDF locally", async ({ page }) => {
   const pdfText = "MetaLearn PDF import fixture. Active retrieval requires learners to answer before seeing source evidence. Confidence calibration detects high confidence errors.";
 

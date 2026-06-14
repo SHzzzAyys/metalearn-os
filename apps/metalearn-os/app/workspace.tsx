@@ -267,6 +267,13 @@ function buildQuickCommands(workspace: Workspace, sourceId?: string): QuickComma
       run: () => navigate("/library#material-import")
     },
     {
+      id: "sample-pack",
+      section: "资料",
+      title: "加载本地示例包",
+      detail: "不用文件和 AI，直接生成一份示例材料与待审核候选题。",
+      run: workspace.loadSamplePack
+    },
+    {
       id: "review-due",
       section: "复习",
       title: "开始校准复习",
@@ -477,7 +484,20 @@ function HomeView({ workspace }: { workspace: Workspace }) {
           <TextLink href="/library">查看资料库</TextLink>
         </div>
         <div className="mt-5 grid gap-3">
-          {state.sources.length === 0 ? <EmptyState title="先导入一份真实材料" detail="不要从空白开始。用课程笔记、论文段落、考试讲义或技术文档启动完整闭环。" action={<TextLink href="/library">进入资料库</TextLink>} /> : null}
+          {state.sources.length === 0 ? (
+            <EmptyState
+              title="先导入一份真实材料"
+              detail="不要从空白开始。用课程笔记、论文段落、考试讲义或技术文档启动完整闭环；也可以先用本地示例包试跑。"
+              action={
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={() => void workspace.loadSamplePack()}>
+                    <ClipboardCheck size={16} /> 加载本地示例包
+                  </Button>
+                  <TextLink href="/library">进入资料库</TextLink>
+                </div>
+              }
+            />
+          ) : null}
           {derived.assets.slice(0, 5).map((asset: StudyAsset) => (
             <DocumentCard key={asset.id} title={asset.title} detail={asset.detail} meta={asset.kind} status={asset.statusLabel} href={asset.href} />
           ))}
@@ -836,6 +856,9 @@ function LibraryView({ workspace }: { workspace: Workspace }) {
               </SecondaryButton>
               <SecondaryButton onClick={() => void workspace.prepareRecentCandidateGeneration()}>
                 <Sparkles size={16} /> 为最近材料生成候选题
+              </SecondaryButton>
+              <SecondaryButton onClick={() => void workspace.loadSamplePack()}>
+                <ClipboardCheck size={16} /> 加载本地示例包
               </SecondaryButton>
               <SecondaryButton disabled={!currentSource} onClick={() => void workspace.startManualCard(currentSource?.id ?? state.sources[0]?.id)}>
                 <FileText size={16} /> 改为手工建卡

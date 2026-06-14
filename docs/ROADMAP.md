@@ -198,6 +198,27 @@ Design principles:
 - optional repair work should not block first-run completion until review evidence exists;
 - backup is part of the local-first product loop, not a secondary settings feature.
 
+## v0.3.6 - Local Sample Pack
+
+Status: implemented patch.
+
+Goal: let a new evaluator try the core learning loop immediately without finding a PDF, configuring a provider, or trusting AI output.
+
+Included:
+
+- user-triggered local sample study pack from the home empty state, library import panel, and command palette;
+- built-in sample material about active retrieval, confidence calibration, high-confidence errors, and Feynman explanation;
+- deterministic source chunks and source-grounded candidate cards written to IndexedDB;
+- candidate cards remain in the human review bench and are not auto-approved;
+- duplicate guard so loading the same sample pack again does not create repeated materials;
+- E2E coverage that confirms the sample path does not show an AI upload preview.
+
+Design principles:
+
+- give first-time users a low-pressure way to see the workflow, without turning the product into a fake demo dashboard;
+- sample data must be visibly local, reviewable, and removable through normal local data controls;
+- local sample data is not a substitute for a future hosted demo or real user-material testing.
+
 ## v0.4.0 - Explanation Versions and Insight Quality
 
 Status: partially implemented.

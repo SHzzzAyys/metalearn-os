@@ -129,6 +129,52 @@ const emptyManualCardForm: ManualCardForm = {
   tagsText: ""
 };
 
+const sampleStudyPackTitle = "示例：主动提取与信心校准";
+const sampleStudyPackText = `# 主动提取与信心校准示例材料
+
+主动提取要求学习者先不看材料，从记忆中写出答案，再用来源证据校对。它和重读的差别不是学习时间长短，而是是否真的从记忆里取出信息。主动提取会暴露“我看着很熟”和“我能独立说出来”之间的差距。
+
+信心校准要求学习者在看到反馈之前预测自己答对的可能性。预测必须发生在反馈前，否则只是在事后解释结果。校准记录会把信心和实际结果放在一起比较，帮助学习者发现过度自信或低估自己的情况。
+
+高信心错误指学习者非常确定但实际答错或只答对一部分。这类错误比低信心错误更值得优先修复，因为它说明熟悉感正在伪装成掌握。处理高信心错误时，最好回到来源片段，写出错因，再用费曼解释或补救卡修正。
+
+费曼解释要求学习者用自己的话说明概念、机制、例子和边界。好的解释不是背标准答案，而是能说清“为什么会这样”“什么时候不适用”“和相近概念有什么区别”。如果解释被追问后能补上机制、例子或边界，才说明理解证据变强。`;
+
+const sampleCandidateBlueprints: Array<Omit<CardCandidate, "id" | "sourceChunkId" | "status" | "createdAt">> = [
+  {
+    question: "主动提取和重读的关键区别是什么？",
+    expectedAnswer: "主动提取要求先不看材料，从记忆中写出答案，再用来源证据校对；重读可能只增加熟悉感，不证明能独立取出信息。",
+    sourceQuote: "主动提取要求学习者先不看材料，从记忆中写出答案，再用来源证据校对。",
+    cardType: "comparison",
+    difficulty: 2,
+    tags: ["demo", "course", "retrieval"]
+  },
+  {
+    question: "为什么信心预测必须发生在反馈之前？",
+    expectedAnswer: "因为校准要比较预测和实际结果；如果看到反馈后再判断，就变成事后解释，无法测量真实信心偏差。",
+    sourceQuote: "信心校准要求学习者在看到反馈之前预测自己答对的可能性。",
+    cardType: "mechanism",
+    difficulty: 3,
+    tags: ["demo", "course", "calibration"]
+  },
+  {
+    question: "为什么高信心错误应该优先修复？",
+    expectedAnswer: "高信心错误说明学习者非常确定却答错或部分答对，熟悉感可能正在伪装成掌握，因此更需要回到来源、记录错因并生成补救行动。",
+    sourceQuote: "高信心错误指学习者非常确定但实际答错或只答对一部分。",
+    cardType: "mechanism",
+    difficulty: 3,
+    tags: ["demo", "course", "repair"]
+  },
+  {
+    question: "费曼解释需要覆盖哪些信息，才不只是背标准答案？",
+    expectedAnswer: "需要用自己的话说明概念、机制、例子和边界，并能区分相近概念；被追问后补上缺口才是更强的理解证据。",
+    sourceQuote: "费曼解释要求学习者用自己的话说明概念、机制、例子和边界。",
+    cardType: "definition",
+    difficulty: 2,
+    tags: ["demo", "course", "feynman"]
+  }
+];
+
 function result(ok: boolean, message: string, extra: Partial<ActionResult> = {}): ActionResult {
   return { ok, message, ...extra };
 }
@@ -483,6 +529,96 @@ export function useMetaLearnWorkspace() {
     const saved = await saveSourceFromCurrentInput();
     if ("ok" in saved) return saved;
     return setAction(result(true, `已导入并分成 ${saved.sourceChunks.length} 个来源片段。`, { eventId: saved.eventId }));
+  }
+
+  async function loadSamplePack(): Promise<ActionResult> {
+    const existingSource = state.sources.find((source) => source.title === sampleStudyPackTitle && source.rawText === sampleStudyPackText);
+    if (existingSource) {
+      const existingChunks = state.chunks.filter((chunk) => chunk.sourceId === existingSource.id);
+      const existingChunkIds = new Set(existingChunks.map((chunk) => chunk.id));
+      const existingCandidates = state.candidates.filter((candidate) => existingChunkIds.has(candidate.sourceChunkId));
+      const pendingCandidateIds = existingCandidates.filter((candidate) => candidate.status === "candidate").map((candidate) => candidate.id);
+      const approvedCards = state.cards.filter((card) => existingChunkIds.has(card.sourceChunkId));
+      setTitleState(sampleStudyPackTitle);
+      setTemplateId("course");
+      setSourceInputTypeState("markdown");
+      setSourceTextState(sampleStudyPackText);
+      updateMaterialImportDraft({
+        stage: pendingCandidateIds.length > 0 ? "candidates_ready" : "source_saved",
+        fileKind: "pasted",
+        title: sampleStudyPackTitle,
+        inputType: "markdown",
+        textLength: sampleStudyPackText.length,
+        pageCount: undefined,
+        sourceId: existingSource.id,
+        chunkCount: existingChunks.length,
+        previewId: undefined,
+        generatedCandidateCount: pendingCandidateIds.length,
+        candidateIds: pendingCandidateIds,
+        error: undefined
+      });
+      const message =
+        pendingCandidateIds.length > 0
+          ? "示例包已在资料库中。可以打开候选题审核台，批准一张卡后进入复习。"
+          : approvedCards.length > 0
+            ? "示例包已在资料库中，且已有批准卡片。可以直接进入校准复习。"
+            : "示例包已在资料库中。可以从材料详情继续建卡或解释。";
+      return setAction(result(true, message));
+    }
+
+    const timestamp = new Date().toISOString();
+    const sourceId = createId("source");
+    const importJobId = createId("import");
+    const sourceChunks = chunkText(sourceId, sampleStudyPackText, 760);
+    const candidates = buildSampleCandidates(sourceChunks, timestamp);
+    const source: SourceDocument = {
+      id: sourceId,
+      title: sampleStudyPackTitle,
+      templateId: "course",
+      inputType: "markdown",
+      rawText: sampleStudyPackText,
+      status: "candidates",
+      summary: "本地示例材料，用于快速试跑导入、候选题审核、校准复习和高信心错误修复闭环。",
+      lastWorkedAt: timestamp,
+      candidateCount: candidates.length,
+      approvedCardCount: 0,
+      explanationCount: 0,
+      createdAt: timestamp,
+      updatedAt: timestamp
+    };
+    const sourceImportedEventId = createId("event");
+    const candidatesGeneratedEventId = createId("event");
+    const db = getMetaLearnDb();
+    await db.transaction("rw", [db.sourceDocuments, db.sourceChunks, db.importJobs, db.cardCandidates, db.conceptNodes], async () => {
+      await db.sourceDocuments.put(source);
+      await db.sourceChunks.bulkPut(sourceChunks);
+      await db.importJobs.put({ id: importJobId, sourceId, inputType: "markdown", status: "chunked", chunkCount: sourceChunks.length, createdAt: timestamp, updatedAt: timestamp });
+      await db.cardCandidates.bulkPut(candidates);
+      await db.conceptNodes.put({ id: `concept_material_${sourceId}`, label: sampleStudyPackTitle, source: "material", sourceId, strength: 1, createdAt: timestamp, updatedAt: timestamp });
+    });
+    await saveLearningEvent({ id: sourceImportedEventId, sourceId, appId: "metalearn-os", actionType: "source_imported", outcome: "saved", createdAt: timestamp });
+    await saveLearningEvent({ id: candidatesGeneratedEventId, sourceId, appId: "metalearn-os", actionType: "candidate_generated", outcome: "saved", createdAt: timestamp });
+
+    setTitleState(sampleStudyPackTitle);
+    setTemplateId("course");
+    setSourceInputTypeState("markdown");
+    setSourceTextState(sampleStudyPackText);
+    await loadData();
+    updateMaterialImportDraft({
+      stage: "candidates_ready",
+      fileKind: "pasted",
+      title: sampleStudyPackTitle,
+      inputType: "markdown",
+      textLength: sampleStudyPackText.length,
+      pageCount: undefined,
+      sourceId,
+      chunkCount: sourceChunks.length,
+      previewId: undefined,
+      generatedCandidateCount: candidates.length,
+      candidateIds: candidates.map((candidate) => candidate.id),
+      error: undefined
+    });
+    return setAction(result(true, `已加载本地示例包：${sourceChunks.length} 个片段、${candidates.length} 张候选题。请先人工审核，再进入复习。`, { eventId: sourceImportedEventId }));
   }
 
   async function prepareCandidateGeneration(source = activeSource): Promise<ActionResult> {
@@ -1475,6 +1611,7 @@ export function useMetaLearnWorkspace() {
     setImportStrategy,
     cancelJsonImport,
     confirmJsonImport,
+    loadSamplePack,
     exportJson,
     exportMaterial,
     archiveSource,
@@ -1498,6 +1635,22 @@ function scoreAverage(scores: ExplanationAttempt["rubricScores"]): number {
 
 function buildManualSourceQuote(chunk: SourceChunk): string {
   return chunk.text.replace(/\s+/g, " ").trim().slice(0, 260);
+}
+
+function buildSampleCandidates(chunks: SourceChunk[], createdAt: string): CardCandidate[] {
+  return sampleCandidateBlueprints.map((blueprint) => {
+    const sourceChunk = chunks.find((chunk) => chunk.text.includes(blueprint.sourceQuote));
+    if (!sourceChunk) {
+      throw new Error(`示例候选题来源摘录缺失：${blueprint.sourceQuote}`);
+    }
+    return {
+      ...blueprint,
+      id: createId("candidate"),
+      sourceChunkId: sourceChunk.id,
+      status: "candidate",
+      createdAt
+    };
+  });
 }
 
 function compareSavedStudyViews(left: SavedStudyView, right: SavedStudyView): number {
