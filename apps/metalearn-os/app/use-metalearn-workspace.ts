@@ -205,7 +205,8 @@ export function useMetaLearnWorkspace() {
       aiConfigs,
       aiRequestPreviews,
       repairTasks,
-      savedStudyViews
+      savedStudyViews,
+      learningEvents
     ] = await Promise.all([
       db.sourceDocuments.orderBy("createdAt").reverse().toArray(),
       db.sourceChunks.toArray(),
@@ -223,7 +224,8 @@ export function useMetaLearnWorkspace() {
       db.aiProviderConfigs.orderBy("updatedAt").reverse().toArray(),
       db.aiRequestPreviews.orderBy("createdAt").reverse().toArray(),
       db.repairTasks.orderBy("createdAt").reverse().toArray(),
-      db.savedStudyViews.orderBy("updatedAt").reverse().toArray()
+      db.savedStudyViews.orderBy("updatedAt").reverse().toArray(),
+      db.learningEvents.orderBy("createdAt").reverse().limit(200).toArray()
     ]);
     setState({
       sources,
@@ -242,7 +244,8 @@ export function useMetaLearnWorkspace() {
       aiConfigs,
       aiRequestPreviews,
       repairTasks,
-      savedStudyViews: savedStudyViews.sort(compareSavedStudyViews)
+      savedStudyViews: savedStudyViews.sort(compareSavedStudyViews),
+      learningEvents
     });
     setNowMs(Date.now());
     setIsLoading(false);
@@ -1263,7 +1266,8 @@ export function useMetaLearnWorkspace() {
     }
   }
 
-  function exportJson() {
+  async function exportJson(): Promise<ActionResult> {
+    const timestamp = new Date().toISOString();
     const payload = {
       materials: state.sources,
       chunks: state.chunks,
@@ -1287,7 +1291,10 @@ export function useMetaLearnWorkspace() {
       serializeExportPackage(payload, createExportManifest(payload)),
       "application/json"
     );
-    void saveLearningEvent({ id: createId("event"), appId: "metalearn-os", actionType: "data_exported", outcome: "exported", createdAt: new Date().toISOString() });
+    const eventId = createId("event");
+    await saveLearningEvent({ id: eventId, appId: "metalearn-os", actionType: "data_exported", outcome: "exported", createdAt: timestamp });
+    await loadData();
+    return setAction(result(true, "已导出本地 JSON 备份。", { eventId }));
   }
 
   async function exportMaterial(sourceId: string): Promise<ActionResult> {

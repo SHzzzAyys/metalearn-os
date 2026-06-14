@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Card, CardCandidate, ExplanationAttempt, RepairTask, ReviewLog, SourceChunk, SourceDocument } from "@metalearn/core";
+import type { Card, CardCandidate, ExplanationAttempt, LearningEvent, RepairTask, ReviewLog, SourceChunk, SourceDocument } from "@metalearn/core";
 import { createInitialFsrsState } from "@metalearn/learning-science";
 import {
   buildChunkRecallPrompts,
@@ -8,6 +8,7 @@ import {
   deriveCalibrationTrend,
   deriveChunkEvidenceSummaries,
   deriveExplanationThreads,
+  deriveGettingStartedChecklist,
   deriveInsightEvidenceThresholds,
   deriveInsightActions,
   deriveMaterialDetail,
@@ -115,6 +116,7 @@ function workspaceState(overrides: Partial<WorkspaceState> = {}): WorkspaceState
     aiRequestPreviews: [],
     repairTasks: [],
     savedStudyViews: [],
+    learningEvents: [],
     ...overrides
   };
 }
@@ -350,6 +352,92 @@ describe("scoped insight selectors", () => {
     expect(views.map((view) => view.id)).toContain("candidate-review");
     expect(views.some((view) => view.scopeLabel === "tag" && (view.href.includes("/review?tag=") || view.href.includes("/review/mistakes?tag=")))).toBe(true);
     expect(views[0].priority).toBe("high");
+  });
+});
+
+describe("getting started checklist selector", () => {
+  it("starts with material import when the workspace has no local evidence", () => {
+    const checklist = deriveGettingStartedChecklist(
+      workspaceState({
+        sources: [],
+        chunks: [],
+        candidates: [],
+        cards: [],
+        logs: [],
+        repairTasks: [],
+        learningEvents: []
+      }),
+      buildRepairTaskSummary([])
+    );
+
+    expect(checklist.map((step) => step.id)).toEqual(["import_material", "create_source_cards", "first_review", "repair_mistakes", "backup_data"]);
+    expect(checklist[0]).toMatchObject({ status: "active", href: "/library#material-import" });
+    expect(checklist.find((step) => step.id === "create_source_cards")?.status).toBe("locked");
+    expect(checklist.find((step) => step.id === "repair_mistakes")?.status).toBe("optional");
+  });
+
+  it("points users to candidate review before treating generated cards as learning evidence", () => {
+    const checklist = deriveGettingStartedChecklist(
+      workspaceState({
+        sources: [sourceA],
+        chunks: [chunkA],
+        candidates: [candidateA],
+        cards: [],
+        logs: []
+      }),
+      buildRepairTaskSummary([])
+    );
+
+    expect(checklist.find((step) => step.id === "import_material")).toMatchObject({ status: "done", metric: "1 份材料" });
+    expect(checklist.find((step) => step.id === "create_source_cards")).toMatchObject({
+      status: "active",
+      href: "/library#candidate-review",
+      actionLabel: "审核候选题",
+      metric: "1 张待审"
+    });
+    expect(checklist.find((step) => step.id === "first_review")?.status).toBe("locked");
+  });
+
+  it("marks review, repair, and backup progress from durable local records", () => {
+    const exportEvent: LearningEvent = {
+      id: "event_exported",
+      appId: "metalearn-os",
+      actionType: "data_exported",
+      outcome: "exported",
+      createdAt: "2026-06-03T00:00:00.000Z"
+    };
+    const repairTask: RepairTask = {
+      id: "repair_open",
+      reviewLogId: "review_a",
+      cardId: "card_a",
+      sourceId: "source_a",
+      sourceChunkId: "chunk_a",
+      status: "open",
+      reason: "not_retrieved",
+      confidence: 5,
+      outcome: "again",
+      tagSnapshot: ["course", "spacing"],
+      createdAt: "2026-06-03T00:00:00.000Z",
+      updatedAt: "2026-06-03T00:00:00.000Z",
+      linkedRemedialCandidateIds: []
+    };
+    const checklist = deriveGettingStartedChecklist(
+      workspaceState({
+        sources: [sourceA],
+        chunks: [chunkA],
+        candidates: [],
+        cards: [cardA],
+        logs: [reviewA],
+        repairTasks: [repairTask],
+        learningEvents: [exportEvent]
+      }),
+      buildRepairTaskSummary([repairTask])
+    );
+
+    expect(checklist.find((step) => step.id === "create_source_cards")).toMatchObject({ status: "done", metric: "1 张卡片" });
+    expect(checklist.find((step) => step.id === "first_review")).toMatchObject({ status: "done", metric: "1 次复习" });
+    expect(checklist.find((step) => step.id === "repair_mistakes")).toMatchObject({ status: "active", metric: "1 个待修复" });
+    expect(checklist.find((step) => step.id === "backup_data")).toMatchObject({ status: "done", metric: "已导出" });
   });
 });
 

@@ -56,6 +56,7 @@ High-value unit tests should cover:
 - confidence reliability bucket status: `empty`, `thin`, and `enough`;
 - insight evidence thresholds that prevent thin review data from being treated as stable conclusions;
 - scoped material, tag, and concept insight derivation with evidence status and action links;
+- getting-started checklist status for empty workspace, pending candidates, approved cards, completed reviews, unresolved repair tasks, and exported backup evidence;
 - home study view priority for repair, due review, candidates, material, tag, concept, and first-material fallback;
 - saved study view management: local title/detail/priority edits, last-opened tracking, and settings-page persistence;
 - saved study view export/import defaults, conflict remapping, and duplicate skipping;
@@ -100,6 +101,7 @@ Desktop and mobile should cover:
 - today's review progress panel updates after a completed review and flags high-confidence errors;
 - undoing the just-finished review restores the card, removes the fresh review log, and removes the fresh repair task before re-rating;
 - strict review state machine and keyboard shortcuts;
+- home shippable-loop checklist visibility and links for import, source cards, first review, mistake repair, and local backup;
 - home study mode launcher and global command palette navigation;
 - home study views for scoped repair/review/candidate/material/tag/concept continuation;
 - pinning, editing, opening, and unpinning a home study view without breaking the underlying scoped link;

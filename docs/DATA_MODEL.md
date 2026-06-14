@@ -45,6 +45,7 @@ Derived insight evidence:
 - `insightEvidenceThresholds`: local evidence gates for trend and reliability readability. These are derived from review logs and are not stored in IndexedDB.
 - `scopedInsights`: derived material, tag, and concept groups. Each item carries an evidence status, a metric label, detail chips, and an action link back to the relevant workspace.
 - `studyViews`: derived home entries that turn repair tasks, due cards, pending candidates, and scoped insights into one-click learning views.
+- `gettingStartedChecklist`: derived home checklist for a complete local learning loop: import material, create source-grounded cards, finish one calibration review, handle high-confidence repair work, and export a local JSON backup.
 - `savedStudyViews`: persisted copies of user-pinned study views. They store a title, detail, href, scope kind, optional scope value, metric label, priority, `updatedAt`, and optional `lastOpenedAt`. They do not store duplicated material text or card content.
 - Saved study view management is local metadata only: editing a pinned title, detail, or priority does not change cards, chunks, reviews, or repair tasks. Opening a pinned view updates `lastOpenedAt` and writes a `study_view_opened` event so the home launcher can keep useful views near the top without inventing learning evidence.
 - Thin evidence must be shown as thin evidence. The UI must not present empty or one-sample metrics as stable learning conclusions.
@@ -58,6 +59,16 @@ Scoped insights are local selectors, not persisted analytics records:
 - `/library?tag=...` filters the asset search and candidate review bench.
 - `/review?tag=...` and `/review?sourceId=...` scope both the visible queue and the active review card, so review logs are written for the card the user is actually seeing.
 - `/review/mistakes?tag=...` and `/review/mistakes?sourceId=...` filter repair tasks.
+
+The getting-started checklist is intentionally derived from durable local records:
+
+- material progress reads `SourceDocument` and `SourceChunk`;
+- card progress reads pending `CardCandidate` records and approved `Card` records;
+- review progress reads `ReviewLog`;
+- repair progress reads unresolved `RepairTask` records;
+- backup progress reads `LearningEvent.actionType === "data_exported"`.
+
+The checklist must not write learning data, auto-create cards, or mark mastery. It is a navigation and completeness aid for users who need to know which part of the local study loop is still missing.
 
 ## Source Traceability
 

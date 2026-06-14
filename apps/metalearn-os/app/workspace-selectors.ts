@@ -9,6 +9,7 @@ import type {
   ExplanationAttempt,
   InsightSnapshot,
   LearningSession,
+  LearningEvent,
   ProductArea,
   Reflection,
   RepairTask,
@@ -54,6 +55,7 @@ export interface WorkspaceState {
   aiRequestPreviews: AIRequestPreview[];
   repairTasks: RepairTask[];
   savedStudyViews: SavedStudyView[];
+  learningEvents: LearningEvent[];
 }
 
 export const emptyWorkspaceState: WorkspaceState = {
@@ -73,7 +75,8 @@ export const emptyWorkspaceState: WorkspaceState = {
   aiConfigs: [],
   aiRequestPreviews: [],
   repairTasks: [],
-  savedStudyViews: []
+  savedStudyViews: [],
+  learningEvents: []
 };
 
 export const sampleText =
@@ -144,6 +147,7 @@ export function deriveWorkspace(input: { state: WorkspaceState; now: Date; nowMs
     scopedInsights,
     sources: state.sources
   });
+  const gettingStartedChecklist = deriveGettingStartedChecklist(state, repairTaskSummary);
   const latestPreview = state.aiRequestPreviews[0];
   return {
     pendingCandidates,
@@ -164,6 +168,7 @@ export function deriveWorkspace(input: { state: WorkspaceState; now: Date; nowMs
     insightEvidenceThresholds,
     scopedInsights,
     studyViews,
+    gettingStartedChecklist,
     latestPreview,
     repairTaskSummary,
     modules: buildModules(dueCards.length, pendingCandidates.length, repairTaskSummary.openCount),
@@ -310,6 +315,18 @@ export interface StudyView {
   scopeValue?: string;
   metric: string;
   priority: StudyViewPriority;
+}
+
+export type GettingStartedStepStatus = "done" | "active" | "locked" | "optional";
+
+export interface GettingStartedStep {
+  id: "import_material" | "create_source_cards" | "first_review" | "repair_mistakes" | "backup_data";
+  title: string;
+  detail: string;
+  href: string;
+  actionLabel: string;
+  status: GettingStartedStepStatus;
+  metric: string;
 }
 
 export function deriveCalibrationTrend(logs: ReviewLog[], maxPoints = 7): CalibrationTrendPoint[] {
@@ -617,6 +634,76 @@ export function deriveStudyViews(input: {
   }
 
   return dedupeStudyViews(views).slice(0, 5);
+}
+
+export function deriveGettingStartedChecklist(state: WorkspaceState, repairTaskSummary: ReturnType<typeof buildRepairTaskSummary>): GettingStartedStep[] {
+  const firstSource = state.sources[0];
+  const hasMaterial = state.sources.length > 0;
+  const hasChunks = state.chunks.length > 0;
+  const pendingCount = state.candidates.filter((candidate) => candidate.status === "candidate").length;
+  const hasApprovedCard = state.cards.length > 0;
+  const hasReview = state.logs.length > 0;
+  const unresolvedRepairs = repairTaskSummary.unresolvedCount;
+  const hasExport = state.learningEvents.some((event) => event.actionType === "data_exported");
+
+  return [
+    {
+      id: "import_material",
+      title: "导入第一份材料",
+      detail: hasMaterial ? "资料库已经有真实材料，后续卡片和解释都能追溯来源。" : "从课程笔记、论文段落、考试讲义或技术文档开始。",
+      href: "/library#material-import",
+      actionLabel: hasMaterial ? "查看资料库" : "导入材料",
+      status: hasMaterial ? "done" : "active",
+      metric: `${state.sources.length} 份材料`
+    },
+    {
+      id: "create_source_cards",
+      title: "建立来源卡",
+      detail: hasApprovedCard
+        ? "已经有可复习卡片，保留了 sourceQuote 和 sourceChunkId。"
+        : pendingCount > 0
+          ? `还有 ${pendingCount} 张候选题待审核，批准后才进入复习。`
+          : hasChunks
+            ? "从来源片段生成候选题，或不用 AI 手工建卡。"
+            : "先保存材料并生成 chunk，才能创建来源卡。",
+      href: pendingCount > 0 ? "/library#candidate-review" : firstSource ? `/library/${firstSource.id}` : "/library#material-import",
+      actionLabel: hasApprovedCard ? "查看复习队列" : pendingCount > 0 ? "审核候选题" : "生成或手工建卡",
+      status: hasApprovedCard ? "done" : hasMaterial ? "active" : "locked",
+      metric: hasApprovedCard ? `${state.cards.length} 张卡片` : `${pendingCount} 张待审`
+    },
+    {
+      id: "first_review",
+      title: "完成一次校准复习",
+      detail: hasReview ? "已经产生复习证据，可以开始看 Brier、信心偏差和提取强度。" : "先评信心，再主动回答，最后自评并揭示来源。",
+      href: "/review",
+      actionLabel: hasReview ? "继续复习" : "开始复习",
+      status: hasReview ? "done" : hasApprovedCard ? "active" : "locked",
+      metric: `${state.logs.length} 次复习`
+    },
+    {
+      id: "repair_mistakes",
+      title: "处理高信心错误",
+      detail:
+        unresolvedRepairs > 0
+          ? "高信心错误最容易伪装成掌握，先解释或补救。"
+          : hasReview
+            ? "当前没有未解决高信心错误；后续出现时会进入修复任务。"
+            : "完成复习后，如果出现高信心错误，这里会变成待办。",
+      href: "/review/mistakes",
+      actionLabel: unresolvedRepairs > 0 ? "处理错误" : "查看修复任务",
+      status: unresolvedRepairs > 0 ? "active" : hasReview ? "done" : "optional",
+      metric: `${unresolvedRepairs} 个待修复`
+    },
+    {
+      id: "backup_data",
+      title: "导出本地备份",
+      detail: hasExport ? "已经导出过 JSON 备份，可在新浏览器中恢复。" : "本地优先意味着你也应该保留一份可恢复 JSON 包。",
+      href: "/settings",
+      actionLabel: hasExport ? "再次导出" : "去导出",
+      status: hasExport ? "done" : hasMaterial ? "active" : "locked",
+      metric: hasExport ? "已导出" : "未导出"
+    }
+  ];
 }
 
 export function deriveMaterialDetail(state: WorkspaceState, sourceId: string) {

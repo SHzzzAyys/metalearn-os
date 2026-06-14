@@ -22,7 +22,7 @@ Most study tools optimize for storing notes, generating summaries, or scheduling
 
 The active app is `apps/metalearn-os`, a unified product with six workspaces:
 
-- `首页`: today's next best action, due reviews, high-confidence errors, pending candidates, and calibration indicators.
+- `首页`: today's next best action, shippable-loop checklist, due reviews, high-confidence errors, pending candidates, and calibration indicators.
 - `资料库`: materials, chunks, candidate questions, approved cards, explanations, and source-grounded assets.
 - `校准记忆`: confidence prediction, active answer, self-rating, source reveal, calibration gap, and review scheduling.
 - `费曼解释`: explanation attempts, three Socratic questions, rubric scores, version history, gap tags, concept nodes, and card handoff.
@@ -57,6 +57,7 @@ Implemented:
 - review keyboard shortcuts: `1-5` for confidence, `A/P/C/E` for wrong, partial, correct, easy, `U` to undo the just-finished review, and `N` for next card after feedback;
 - today's review progress panel with due remaining, answer distribution, Brier score, accuracy, evidence strength, and high-confidence error count;
 - global command palette with `Ctrl/Cmd+K` for navigation, review, repair, import, export, and privacy actions;
+- home shippable-loop checklist for first material import, source-grounded card creation, first calibration review, high-confidence error repair, and local JSON backup;
 - home study mode launcher for import, calibration review, mistake repair, Feynman explanation, and planning;
 - high-confidence error repair tasks at `/review/mistakes`;
 - simplified FSRS adapter interface;

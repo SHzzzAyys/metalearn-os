@@ -80,7 +80,8 @@ import {
   viewMeta,
   type ActiveReadingTrack,
   type ChunkEvidenceSummary,
-  type ExplanationConceptThread
+  type ExplanationConceptThread,
+  type GettingStartedStepStatus
 } from "./workspace-selectors";
 
 type Workspace = ReturnType<typeof useMetaLearnWorkspace>;
@@ -464,7 +465,10 @@ function HomeView({ workspace }: { workspace: Workspace }) {
         </Button>
       </TaskRail>
       <Panel>
-        <StudyModeLauncher workspace={workspace} />
+        <GettingStartedChecklist workspace={workspace} />
+        <div className="mt-6 border-t border-zinc-100 pt-5">
+          <StudyModeLauncher workspace={workspace} />
+        </div>
         <div className="mt-6 flex items-center justify-between gap-3 border-t border-zinc-100 pt-5">
           <div>
             <h3 className="text-2xl font-semibold tracking-[-0.02em]">当前学习资产</h3>
@@ -495,6 +499,83 @@ function HomeView({ workspace }: { workspace: Workspace }) {
       </Panel>
     </section>
   );
+}
+
+function GettingStartedChecklist({ workspace }: { workspace: Workspace }) {
+  const steps = workspace.derived.gettingStartedChecklist;
+  const requiredSteps = steps.filter((step) => step.status !== "optional");
+  const doneCount = requiredSteps.filter((step) => step.status === "done").length;
+  const totalCount = requiredSteps.length;
+
+  return (
+    <section aria-labelledby="getting-started-title">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase text-emerald-700">local-first loop</p>
+          <h3 id="getting-started-title" className="mt-2 text-2xl font-semibold">
+            成品上手清单
+          </h3>
+          <p className="mt-1 max-w-[70ch] text-sm leading-6 text-zinc-600">先把真实材料、来源卡、校准复习、错误修复和本地备份跑通，再追求更复杂的学习系统。</p>
+        </div>
+        <div className="rounded-2xl bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-900">
+          {doneCount}/{totalCount} 已完成
+        </div>
+      </div>
+      <div className="mt-4 grid gap-2">
+        {steps.map((step, index) => {
+          const disabled = step.status === "locked";
+          const content = (
+            <div className="flex min-w-0 flex-col gap-3 rounded-2xl bg-zinc-50 px-4 py-3 transition hover:bg-emerald-50 sm:flex-row sm:items-center">
+              <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl text-sm font-semibold ${gettingStartedIconClass(step.status)}`}>
+                {step.status === "done" ? <Check size={17} /> : step.status === "locked" ? <Lock size={16} /> : step.status === "optional" ? <HelpCircle size={16} /> : index + 1}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="break-words text-base font-semibold text-zinc-950">{step.title}</h4>
+                  <span className={`rounded-lg px-2 py-1 text-[11px] font-semibold ${gettingStartedBadgeClass(step.status)}`}>{gettingStartedStatusLabel(step.status)}</span>
+                </div>
+                <p className="mt-1 break-words text-sm leading-6 text-zinc-600">{step.detail}</p>
+              </div>
+              <div className="flex shrink-0 flex-col gap-2 sm:items-end">
+                <span className="text-xs font-semibold text-zinc-500">{step.metric}</span>
+                <span className={`text-sm font-semibold ${disabled ? "text-zinc-400" : "text-emerald-700"}`}>{step.actionLabel}</span>
+              </div>
+            </div>
+          );
+          return disabled ? (
+            <div key={step.id} aria-disabled="true">
+              {content}
+            </div>
+          ) : (
+            <a key={step.id} href={step.href} aria-label={`${step.title}：${step.actionLabel}`} className="block rounded-2xl focus:outline-none focus:ring-2 focus:ring-emerald-500">
+              {content}
+            </a>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function gettingStartedStatusLabel(status: GettingStartedStepStatus) {
+  if (status === "done") return "完成";
+  if (status === "active") return "下一步";
+  if (status === "locked") return "未解锁";
+  return "观察";
+}
+
+function gettingStartedIconClass(status: GettingStartedStepStatus) {
+  if (status === "done") return "bg-emerald-600 text-white";
+  if (status === "active") return "bg-emerald-100 text-emerald-900";
+  if (status === "locked") return "bg-zinc-200 text-zinc-500";
+  return "bg-amber-100 text-amber-900";
+}
+
+function gettingStartedBadgeClass(status: GettingStartedStepStatus) {
+  if (status === "done") return "bg-emerald-100 text-emerald-800";
+  if (status === "active") return "bg-amber-100 text-amber-900";
+  if (status === "locked") return "bg-zinc-200 text-zinc-600";
+  return "bg-zinc-200 text-zinc-700";
 }
 
 function StudyModeLauncher({ workspace }: { workspace: Workspace }) {

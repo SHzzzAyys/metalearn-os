@@ -177,6 +177,27 @@ Design principles:
 - keep the reading track derived from local evidence instead of adding hidden progress state;
 - use AI-product references only for interaction inspiration, not for unsupported learning claims.
 
+## v0.3.5 - Shippable Loop Onboarding
+
+Status: implemented patch.
+
+Goal: help a new or returning user see whether the local learning loop is actually usable, not merely whether the app has many workspaces.
+
+Included:
+
+- home shippable-loop checklist for first material import, source-grounded cards, first calibration review, high-confidence error repair, and local JSON backup;
+- checklist status derived from durable local records rather than static copy;
+- backup progress tied to `data_exported` learning events so local-first portability remains visible;
+- locked/active/done/optional states that show what can be acted on now and what still needs prerequisite evidence;
+- unit coverage for empty workspace, pending candidate review, completed review evidence, unresolved repair work, and export evidence;
+- E2E coverage for checklist visibility on the home page.
+
+Design principles:
+
+- onboarding should expose the source-grounded learning contract instead of hiding it behind a generic welcome screen;
+- optional repair work should not block first-run completion until review evidence exists;
+- backup is part of the local-first product loop, not a secondary settings feature.
+
 ## v0.4.0 - Explanation Versions and Insight Quality
 
 Status: partially implemented.

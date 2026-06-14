@@ -37,6 +37,9 @@ test("MetaLearn OS completes the unified learning loop", async ({ page }) => {
 
   await expect(page.getByRole("heading", { name: "今天该做什么" })).toBeVisible();
   await expect(page.getByText("北极星指标")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "成品上手清单" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "导入第一份材料" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "建立来源卡" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "继续学习视图" })).toBeVisible();
 
   await page.goto("/library");
@@ -94,6 +97,7 @@ test("MetaLearn OS completes the unified learning loop", async ({ page }) => {
 test("MetaLearn OS exposes a study mode launcher and command palette", async ({ page }) => {
   await page.goto("/");
 
+  await expect(page.getByRole("heading", { name: "成品上手清单" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "现在想怎么学" })).toBeVisible();
   await expect(page.getByRole("link", { name: /校准复习/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "命令" })).toBeVisible();
